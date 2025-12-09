@@ -15,9 +15,9 @@ function getPrefKey(key: string) {
   return `${config.prefsPrefix}.${key}`;
 }
 
-function getInput(id: string): HTMLInputElement | HTMLTextAreaElement {
+function getInput(id: string): HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement {
   const el = document.getElementById(id);
-  if (!el || (!(el instanceof HTMLInputElement) && !(el instanceof HTMLTextAreaElement))) {
+  if (!el || (!(el instanceof HTMLInputElement) && !(el instanceof HTMLTextAreaElement) && !(el instanceof HTMLSelectElement))) {
     throw new Error(`Missing input ${id}`);
   }
   return el;
@@ -43,8 +43,8 @@ function initForm(Zotero: any) {
     (Zotero.Prefs.get(getPrefKey("model"), true) as string) ||
     "gemini-1.5-flash-latest";
   apiKey.value = (Zotero.Prefs.get(getPrefKey("apiKey"), true) as string) || "";
-  
-  let prompts: Array<{name: string, prompt: string}> = [];
+
+  let prompts: Array<{ name: string, prompt: string }> = [];
   try {
     prompts = JSON.parse((Zotero.Prefs.get(getPrefKey("customPrompts"), true) as string) || "[]");
   } catch (e) {
@@ -90,7 +90,7 @@ function initForm(Zotero: any) {
       delBtn.style.padding = "2px 6px";
       delBtn.style.color = "#cf222e";
       delBtn.style.borderColor = "rgba(27, 31, 36, 0.15)";
-      
+
       delBtn.onclick = () => {
         prompts.splice(index, 1);
         updatePrompts();
@@ -114,7 +114,7 @@ function initForm(Zotero: any) {
     const name = newPromptName.value.trim();
     const prompt = newPromptText.value.trim();
     if (!name || !prompt) return;
-    
+
     prompts.push({ name, prompt });
     newPromptName.value = "";
     newPromptText.value = "";
