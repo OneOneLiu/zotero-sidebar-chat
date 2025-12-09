@@ -24,6 +24,9 @@
     "update-deps": "npm update --save"
   },
   "dependencies": {
+    "@types/markdown-it": "^14.1.2",
+    "markdown-it": "^14.1.0",
+    "markdown-it-texmath": "^1.0.0",
     "zotero-plugin-toolkit": "^5.1.0-beta.8"
   },
   "devDependencies": {
@@ -33,4 +36,3 @@
     "zotero-types": "^4.1.0-beta.3"
   }
 }
-

@@ -2,6 +2,9 @@ import { BasicTool } from "zotero-plugin-toolkit";
 import Addon from "./addon";
 import { config } from "../package.json";
 
+// @ts-ignore
+declare const _globalThis: any;
+
 const basicTool = new BasicTool();
 
 // @ts-ignore - Plugin instance is not typed
