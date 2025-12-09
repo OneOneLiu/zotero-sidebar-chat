@@ -13,6 +13,7 @@ export function getSettings() {
       (Zotero.Prefs.get(getPrefKey("model"), true) as string) ||
       "gemini-1.5-flash-latest",
     apiKey: (Zotero.Prefs.get(getPrefKey("apiKey"), true) as string) || "",
+    customPrompts: (Zotero.Prefs.get(getPrefKey("customPrompts"), true) as string) || "[]",
   };
 }
 

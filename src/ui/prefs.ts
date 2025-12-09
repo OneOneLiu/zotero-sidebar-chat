@@ -15,9 +15,9 @@ function getPrefKey(key: string) {
   return `${config.prefsPrefix}.${key}`;
 }
 
-function getInput(id: string): HTMLInputElement {
+function getInput(id: string): HTMLInputElement | HTMLTextAreaElement {
   const el = document.getElementById(id);
-  if (!el || !(el instanceof HTMLInputElement)) {
+  if (!el || (!(el instanceof HTMLInputElement) && !(el instanceof HTMLTextAreaElement))) {
     throw new Error(`Missing input ${id}`);
   }
   return el;
@@ -27,6 +27,7 @@ function initForm(Zotero: any) {
   const apiBase = getInput("api-base");
   const model = getInput("model");
   const apiKey = getInput("api-key");
+  const customPrompts = getInput("custom-prompts");
   const status = document.getElementById("test-status") as HTMLDivElement;
   const testBtn = document.getElementById("test-btn") as HTMLButtonElement;
 
@@ -37,6 +38,7 @@ function initForm(Zotero: any) {
     (Zotero.Prefs.get(getPrefKey("model"), true) as string) ||
     "gemini-1.5-flash-latest";
   apiKey.value = (Zotero.Prefs.get(getPrefKey("apiKey"), true) as string) || "";
+  customPrompts.value = (Zotero.Prefs.get(getPrefKey("customPrompts"), true) as string) || "[]";
 
   const save = (id: string, value: string) => {
     Zotero.Prefs.set(getPrefKey(id), value, true);
@@ -45,6 +47,7 @@ function initForm(Zotero: any) {
   apiBase.addEventListener("change", () => save("apiBase", apiBase.value.trim()));
   model.addEventListener("change", () => save("model", model.value.trim()));
   apiKey.addEventListener("change", () => save("apiKey", apiKey.value.trim()));
+  customPrompts.addEventListener("change", () => save("customPrompts", customPrompts.value.trim()));
 
   testBtn.addEventListener("click", async () => {
     status.textContent = "Testing...";

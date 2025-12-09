@@ -160,18 +160,89 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
     header.style.display = "flex";
     header.style.flexDirection = "column";
     header.style.gap = "4px";
+
+    const titleRow = doc.createElement("div");
+    titleRow.style.display = "flex";
+    titleRow.style.justifyContent = "space-between";
+    titleRow.style.alignItems = "center";
+
     const title = doc.createElement("div");
     title.textContent = "Gemini Chat";
     title.style.fontWeight = "bold";
     title.style.fontSize = "13px";
+
+    const saveAllBtn = doc.createElement("button");
+    saveAllBtn.textContent = "💾";
+    saveAllBtn.title = "Save full chat to note";
+    saveAllBtn.style.background = "none";
+    saveAllBtn.style.border = "none";
+    saveAllBtn.style.cursor = "pointer";
+    saveAllBtn.style.fontSize = "14px";
+    saveAllBtn.style.padding = "0 4px";
+    
+    saveAllBtn.onclick = async () => {
+        saveAllBtn.textContent = "...";
+        await saveFullSessionToNote(item, messages);
+        saveAllBtn.textContent = "✔";
+        setTimeout(() => (saveAllBtn.textContent = "💾"), 2000);
+    };
+
+    titleRow.appendChild(title);
+    titleRow.appendChild(saveAllBtn);
+    header.appendChild(titleRow);
+
     const subtitle = doc.createElement("div");
     subtitle.style.fontSize = "11px";
     subtitle.style.color = "var(--color-secondary-label, #555)";
     subtitle.textContent = item?.getField?.("title")
       ? `Current: ${item.getField("title")}`
       : "Select a PDF tab to chat";
-    header.appendChild(title);
     header.appendChild(subtitle);
+
+    // Custom Prompts Section
+    const settings = getSettings();
+    let prompts: Array<{name: string, prompt: string}> = [];
+    try {
+        prompts = JSON.parse(settings.customPrompts);
+    } catch (e) {
+        Zotero.debug(`[GeminiChat] Failed to parse custom prompts: ${e}`);
+    }
+
+    if (prompts.length > 0 && Array.isArray(prompts)) {
+        const promptBar = doc.createElement("div");
+        promptBar.style.display = "flex";
+        promptBar.style.gap = "6px";
+        promptBar.style.overflowX = "auto";
+        promptBar.style.padding = "4px 0";
+        promptBar.style.marginBottom = "4px";
+        
+        // Hide scrollbar but keep functionality
+        promptBar.style.scrollbarWidth = "none"; 
+        
+        prompts.forEach(p => {
+            if (!p.name || !p.prompt) return;
+            const chip = doc.createElement("button");
+            chip.textContent = p.name;
+            chip.title = p.prompt;
+            chip.style.whiteSpace = "nowrap";
+            chip.style.padding = "2px 8px";
+            chip.style.fontSize = "11px";
+            chip.style.border = "1px solid var(--color-border, #ccc)";
+            chip.style.borderRadius = "12px";
+            chip.style.background = "var(--color-field-bg, #fff)";
+            chip.style.cursor = "pointer";
+            
+            chip.addEventListener("click", () => {
+                handleSend(p.prompt);
+            });
+            
+            promptBar.appendChild(chip);
+        });
+        
+        if (promptBar.children.length > 0) {
+            header.appendChild(promptBar);
+        }
+    }
 
     const messageList = doc.createElement("div");
     messageList.className = "gemini-chat-messages";
@@ -221,10 +292,11 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
 
     const renderMessages = () => {
       messageList.innerHTML = "";
-      messages.forEach((m) => {
+      messages.forEach((m, index) => {
         const bubble = doc.createElement("div");
         bubble.style.padding = "6px";
         bubble.style.borderRadius = "6px";
+        bubble.style.position = "relative";
         // bubble.style.whiteSpace = "pre-wrap";
         bubble.style.background =
           m.role === "user" ? "#e8f0fe" : m.role === "model" ? "#f1f5f9" : "#fff3cd";
@@ -232,11 +304,56 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
         bubble.style.userSelect = "text";
         // @ts-ignore
         bubble.style.MozUserSelect = "text";
+
+        if (m.role === "user") {
+          const saveBtn = doc.createElement("button");
+          saveBtn.textContent = "+";
+          saveBtn.title = "Add to Note";
+          saveBtn.className = "save-note-btn";
+          saveBtn.style.position = "absolute";
+          saveBtn.style.top = "-8px";
+          saveBtn.style.left = "-8px";
+          saveBtn.style.width = "20px";
+          saveBtn.style.height = "20px";
+          saveBtn.style.background = "white";
+          saveBtn.style.border = "1px solid #ccc";
+          saveBtn.style.borderRadius = "50%";
+          saveBtn.style.cursor = "pointer";
+          saveBtn.style.fontSize = "14px";
+          saveBtn.style.display = "flex";
+          saveBtn.style.alignItems = "center";
+          saveBtn.style.justifyContent = "center";
+          saveBtn.style.color = "#555";
+          saveBtn.style.zIndex = "10";
+          // saveBtn.style.opacity = "0";
+          // saveBtn.style.transition = "opacity 0.2s";
+
+          saveBtn.onclick = async (e) => {
+            e.stopPropagation();
+            const nextMsg = messages[index + 1];
+            const answer = nextMsg?.role === "model" ? nextMsg.text : "";
+            saveBtn.textContent = "...";
+            await saveToNote(item, m.text, answer);
+            saveBtn.textContent = "✔";
+            setTimeout(() => (saveBtn.textContent = "+"), 2000);
+          };
+          
+          bubble.appendChild(saveBtn);
+          
+          // bubble.addEventListener("mouseenter", () => { saveBtn.style.opacity = "1"; });
+          // bubble.addEventListener("mouseleave", () => { saveBtn.style.opacity = "0"; });
+        }
+
         try {
-          bubble.innerHTML = getMarkdown().render(m.text);
+          // Create a content wrapper to avoid overwriting the button
+          const content = doc.createElement("div");
+          content.innerHTML = getMarkdown().render(m.text);
+          bubble.appendChild(content);
         } catch (e) {
-          bubble.textContent = m.text;
-          bubble.style.whiteSpace = "pre-wrap";
+          const content = doc.createElement("div");
+          content.textContent = m.text;
+          content.style.whiteSpace = "pre-wrap";
+          bubble.appendChild(content);
         }
         messageList.appendChild(bubble);
       });
@@ -325,6 +442,61 @@ function buildQuestionParts(question: string, item?: Zotero.Item): string {
     context = `Paper title: ${title}\n`; 
   }
   return `${context}\nQuestion: ${question}`;
+}
+
+async function saveFullSessionToNote(item: Zotero.Item, messages: ChatMessage[]) {
+  const parentID = item.isAttachment() ? item.parentID : item.id;
+  if (!parentID) return;
+
+  const note = new Zotero.Item("note");
+  note.parentID = parentID;
+
+  let html = `<h2>Gemini Chat Session (${new Date().toLocaleString()})</h2>`;
+  
+  messages.forEach(m => {
+    const role = m.role === "user" ? "User" : (m.role === "model" ? "Gemini" : "System");
+    
+    // Use getMarkdown().render for formatting
+    let content = "";
+    try {
+        content = getMarkdown().render(m.text);
+    } catch (e) {
+        content = m.text; // Fallback
+    }
+
+    html += `<p><strong>${role}:</strong></p>
+    ${content}
+    <hr/>`;
+  });
+
+  note.setNote(html);
+  await note.saveTx();
+  Zotero.debug(`[GeminiChat] Full chat saved to item ${parentID}`);
+}
+
+async function saveToNote(item: Zotero.Item, question: string, answer: string) {
+  const parentID = item.isAttachment() ? item.parentID : item.id;
+  if (!parentID) {
+    Zotero.debug("[GeminiChat] Cannot save note: No parent item found.");
+    return;
+  }
+
+  const note = new Zotero.Item("note");
+  note.parentID = parentID;
+
+  // Format content
+  const qHtml = getMarkdown().render(question);
+  const aHtml = getMarkdown().render(answer);
+
+  note.setNote(`<h2>Gemini Chat</h2>
+<p><strong>User:</strong></p>
+${qHtml}
+<hr/>
+<p><strong>Gemini:</strong></p>
+${aHtml}`);
+
+  await note.saveTx();
+  Zotero.debug(`[GeminiChat] Note saved to item ${parentID}`);
 }
 
 async function getPdfContextPart(item: Zotero.Item): Promise<{ mimeType: string; data: string } | null> {
