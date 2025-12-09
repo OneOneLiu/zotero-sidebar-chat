@@ -6,6 +6,9 @@ export type ChatMessage = {
   role: "user" | "model" | "system";
   text: string;
   at: number;
+  meta?: {
+    duration?: number;
+  };
 };
 
 class Addon {

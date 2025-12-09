@@ -16,10 +16,12 @@ function getMarkdown() {
     try {
       Zotero.debug("[GeminiChat] Initializing MarkdownIt...");
       md = new MarkdownIt({
+        xhtmlOut: true, // Use '/' to close single tags (<br />)
         html: true,
         linkify: true,
         typographer: true,
       });
+
       Zotero.debug("[GeminiChat] Initializing TexMath...");
       md.use(tm, {
         engine: katex,
@@ -120,84 +122,306 @@ export function registerSidebarButton(getPaneKey: () => string) {
 function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
   Zotero.debug(`[GeminiChat] renderChat called for item ${item?.id}`);
 
-  // Ensure markdown is initialized immediately to catch errors early
-  // getMarkdown();
-
   try {
     const itemKey = item?.id ? String(item.id) : "global";
     const messages = addon.getSession(itemKey);
     const doc = body.ownerDocument;
+    const HTML_NS = "http://www.w3.org/1999/xhtml";
 
+    const createElement = (tagName: string) => {
+      return doc.createElementNS(HTML_NS, tagName) as HTMLElement;
+    };
+
+    // Safely get head
+    const head = doc.head || doc.getElementsByTagName("head")[0] || doc.documentElement;
+
+    // Inject CSS
     try {
+      if (!doc.getElementById("gemini-chat-styles")) {
+        const style = createElement("style");
+        style.id = "gemini-chat-styles";
+        style.textContent = `
+          .gemini-chat-wrapper {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--color-background, #fff);
+            color: var(--color-text, #000);
+          }
+          .gemini-chat-header {
+            padding: 12px;
+            border-bottom: 1px solid var(--color-border, #e0e0e0);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            background: var(--color-background, #fff);
+          }
+          .gemini-chat-title-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+          }
+          .gemini-chat-title-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+          }
+          .gemini-chat-title {
+            font-weight: 600;
+            font-size: 14px;
+          }
+          .gemini-chat-model-select {
+            font-size: 11px;
+            padding: 2px 6px;
+            border: 1px solid var(--color-border, #ccc);
+            border-radius: 4px;
+            max-width: 140px;
+            background-color: var(--color-field-bg, #fff);
+            color: var(--color-text, #000);
+          }
+          .gemini-chat-subtitle {
+            font-size: 11px;
+            color: var(--color-secondary-label, #666);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          .gemini-chat-prompts {
+            display: flex;
+            gap: 6px;
+            overflow-x: auto;
+            padding-bottom: 4px;
+            scrollbar-width: none;
+          }
+          .gemini-chat-prompt-chip {
+            white-space: nowrap;
+            padding: 4px 10px;
+            font-size: 11px;
+            border: 1px solid var(--color-border, #e0e0e0);
+            border-radius: 12px;
+            background: var(--color-field-bg, #f5f5f5);
+            cursor: pointer;
+            transition: all 0.2s;
+            color: var(--color-text, #333);
+          }
+          .gemini-chat-prompt-chip:hover {
+            background: var(--color-selection, #e8f0fe);
+            border-color: var(--color-selection, #d2e3fc);
+            color: var(--color-primary, #1a73e8);
+          }
+          .gemini-chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+            background-color: var(--color-background, #fff);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+          }
+          .gemini-chat-bubble {
+            max-width: 85%;
+            padding: 8px 12px;
+            border-radius: 12px;
+            position: relative;
+            font-size: 13px;
+            line-height: 1.5;
+            word-wrap: break-word;
+          }
+          .gemini-chat-bubble.user {
+            align-self: flex-end;
+            background-color: #007aff;
+            color: white;
+            border-bottom-right-radius: 2px;
+          }
+          .gemini-chat-bubble.model {
+            align-self: flex-start;
+            background-color: var(--color-field-bg, #f1f3f4);
+            color: var(--color-text, #000);
+            border-bottom-left-radius: 2px;
+          }
+          .gemini-chat-bubble.system {
+            align-self: center;
+            background-color: var(--color-warning-bg, #fff3cd);
+            color: var(--color-warning-text, #856404);
+            font-size: 11px;
+            padding: 4px 8px;
+          }
+          .gemini-chat-bubble p {
+            margin: 0 0 8px 0;
+          }
+          .gemini-chat-bubble p:last-child {
+            margin: 0;
+          }
+          .gemini-chat-save-btn {
+            position: absolute;
+            top: -6px;
+            left: -8px;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 12px;
+            color: #666;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            opacity: 0;
+            transition: opacity 0.2s;
+          }
+          .gemini-chat-bubble:hover .gemini-chat-save-btn {
+            opacity: 1;
+          }
+          .gemini-chat-input-area {
+            padding: 12px;
+            border-top: 1px solid var(--color-border, #e0e0e0);
+            background: var(--color-background, #fff);
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+          }
+          .gemini-chat-input-row {
+            display: flex;
+            gap: 8px;
+            align-items: flex-end;
+          }
+          .gemini-chat-textarea {
+            flex: 1;
+            border: 1px solid var(--color-border, #ccc);
+            border-radius: 18px;
+            padding: 8px 12px;
+            font-family: inherit;
+            font-size: 13px;
+            resize: none;
+            min-height: 20px;
+            max-height: 100px;
+            outline: none;
+            background-color: var(--color-field-bg, #fff);
+            color: var(--color-text, #000);
+          }
+          .gemini-chat-textarea:focus {
+            border-color: #007aff;
+          }
+          .gemini-chat-send-btn {
+            background-color: #007aff;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s;
+            padding: 0;
+          }
+          .gemini-chat-send-btn:hover {
+            background-color: #0064d1;
+          }
+          .gemini-chat-send-btn:disabled {
+            background-color: #ccc;
+            cursor: default;
+          }
+          .gemini-chat-hint {
+            font-size: 10px;
+            color: var(--color-secondary-label, #888);
+            text-align: center;
+          }
+          .gemini-chat-bubble.loading {
+            background-color: var(--color-field-bg, #f1f3f4);
+            color: var(--color-secondary-label, #888);
+            border-bottom-left-radius: 2px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 12px 16px;
+            width: fit-content;
+          }
+          .gemini-chat-dot {
+            width: 6px;
+            height: 6px;
+            background-color: #888;
+            border-radius: 50%;
+            animation: gemini-chat-bounce 1.4s infinite ease-in-out both;
+          }
+          .gemini-chat-dot:nth-child(1) { animation-delay: -0.32s; }
+          .gemini-chat-dot:nth-child(2) { animation-delay: -0.16s; }
+          
+          @keyframes gemini-chat-bounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+          }
+          .gemini-chat-meta {
+            font-size: 9px;
+            color: var(--color-secondary-label, #999);
+            margin-top: 4px;
+            text-align: right;
+            opacity: 0.8;
+          }
+        `;
+        head.appendChild(style);
+      }
+
+      // Inject Katex CSS if missing
       if (!doc.getElementById("katex-css")) {
-        Zotero.debug("[GeminiChat] Injecting katex CSS...");
-        const link = doc.createElement("link");
+        const link = createElement("link") as HTMLLinkElement;
         link.id = "katex-css";
-        link.rel = "stylesheet";
-        link.href = `chrome://${config.addonRef}/content/style/katex.min.css`;
-        doc.head.appendChild(link);
+        link.setAttribute("rel", "stylesheet");
+        link.setAttribute("href", `chrome://${config.addonRef}/content/style/katex.min.css`);
+        head.appendChild(link);
       }
     } catch (e) {
-      Zotero.debug(`[GeminiChat] Failed to inject CSS: ${e}`);
+      Zotero.debug(`[GeminiChat] CSS Inject Error: ${e}`);
     }
 
     body.innerHTML = "";
 
-    const wrapper = doc.createElement("div");
-    wrapper.className = "gemini-chat-wrapper";
-    wrapper.style.display = "flex";
-    wrapper.style.flexDirection = "column";
-    wrapper.style.gap = "8px";
-    wrapper.style.padding = "8px";
-    wrapper.style.boxSizing = "border-box";
-    wrapper.style.height = "100%";
-    wrapper.style.userSelect = "text";
-    wrapper.style.cursor = "auto";
-    // @ts-ignore
-    wrapper.style.MozUserSelect = "text";
+    const wrapper = createElement("div");
+    wrapper.setAttribute("class", "gemini-chat-wrapper");
 
-    const header = doc.createElement("div");
-    header.style.display = "flex";
-    header.style.flexDirection = "column";
-    header.style.gap = "4px";
+    // --- Header ---
+    const header = createElement("div");
+    header.setAttribute("class", "gemini-chat-header");
 
-    const titleRow = doc.createElement("div");
-    titleRow.style.display = "flex";
-    titleRow.style.justifyContent = "space-between";
-    titleRow.style.alignItems = "center";
-    titleRow.style.gap = "8px";
+    const titleRow = createElement("div");
+    titleRow.setAttribute("class", "gemini-chat-title-row");
 
-    const titleGroup = doc.createElement("div");
-    titleGroup.style.display = "flex";
-    titleGroup.style.alignItems = "center";
-    titleGroup.style.gap = "8px";
-    titleGroup.style.flex = "1";
+    const titleGroup = createElement("div");
+    titleGroup.setAttribute("class", "gemini-chat-title-group");
 
-    const title = doc.createElement("div");
-    title.textContent = "Gemini Chat";
-    title.style.fontWeight = "bold";
-    title.style.fontSize = "13px";
-    title.style.whiteSpace = "nowrap";
+    const title = createElement("div");
+    title.textContent = "Gemini";
+    title.setAttribute("class", "gemini-chat-title");
 
-    const modelSelect = doc.createElement("select");
-    modelSelect.style.fontSize = "11px";
-    modelSelect.style.padding = "1px 4px";
-    modelSelect.style.border = "1px solid #ccc";
-    modelSelect.style.borderRadius = "4px";
-    modelSelect.style.maxWidth = "120px"; // Prevent it from taking too much space
+    const modelSelect = createElement("select") as HTMLSelectElement;
+    modelSelect.setAttribute("class", "gemini-chat-model-select");
 
     const models = [
+      "gemini-1.5-flash-latest",
       "gemini-3-pro-preview",
       "gemini-2.5-flash",
       "gemini-2.5-flash-lite",
       "gemini-2.5-pro"
     ];
 
-    const currentSettings = getSettings();
+    let currentSettings: any = {};
+    try {
+      currentSettings = getSettings();
+    } catch (e) {
+      Zotero.debug(`[GeminiChat] Error getting settings: ${e}`);
+    }
+
     models.forEach(m => {
-      const opt = doc.createElement("option");
+      const opt = createElement("option") as HTMLOptionElement;
       opt.value = m;
-      opt.textContent = m; // Shorten if needed?
+      opt.textContent = m.replace("gemini-", "");
       if (m === currentSettings.model) {
         opt.selected = true;
       }
@@ -212,14 +436,14 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
     titleGroup.appendChild(title);
     titleGroup.appendChild(modelSelect);
 
-    const saveAllBtn = doc.createElement("button");
+    const saveAllBtn = createElement("button");
     saveAllBtn.textContent = "💾";
     saveAllBtn.title = "Save full chat to note";
     saveAllBtn.style.background = "none";
     saveAllBtn.style.border = "none";
     saveAllBtn.style.cursor = "pointer";
-    saveAllBtn.style.fontSize = "14px";
-    saveAllBtn.style.padding = "0 4px";
+    saveAllBtn.style.fontSize = "16px";
+    saveAllBtn.style.opacity = "0.7";
 
     saveAllBtn.onclick = async () => {
       saveAllBtn.textContent = "...";
@@ -232,142 +456,90 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
     titleRow.appendChild(saveAllBtn);
     header.appendChild(titleRow);
 
-    const subtitle = doc.createElement("div");
-    subtitle.style.fontSize = "11px";
-    subtitle.style.color = "var(--color-secondary-label, #555)";
+    const subtitle = createElement("div");
+    subtitle.setAttribute("class", "gemini-chat-subtitle");
     subtitle.textContent = item?.getField?.("title")
-      ? `Current: ${item.getField("title")}`
+      ? item.getField("title")
       : "Select a PDF tab to chat";
     header.appendChild(subtitle);
 
-    // Custom Prompts Section
-    const settings = getSettings();
+    // --- Prompts ---
     let prompts: Array<{ name: string, prompt: string }> = [];
     try {
-      prompts = JSON.parse(settings.customPrompts);
+      if (currentSettings.customPrompts) {
+        prompts = JSON.parse(currentSettings.customPrompts);
+      }
     } catch (e) {
-      Zotero.debug(`[GeminiChat] Failed to parse custom prompts: ${e}`);
+      Zotero.debug(`[GeminiChat] Error parsing prompts: ${e}`);
     }
 
     if (prompts.length > 0 && Array.isArray(prompts)) {
-      const promptBar = doc.createElement("div");
-      promptBar.style.display = "flex";
-      promptBar.style.gap = "6px";
-      promptBar.style.overflowX = "auto";
-      promptBar.style.padding = "4px 0";
-      promptBar.style.marginBottom = "4px";
-
-      // Hide scrollbar but keep functionality
-      promptBar.style.scrollbarWidth = "none";
+      const promptBar = createElement("div");
+      promptBar.setAttribute("class", "gemini-chat-prompts");
 
       prompts.forEach(p => {
         if (!p.name || !p.prompt) return;
-        const chip = doc.createElement("button");
+        const chip = createElement("button");
+        chip.setAttribute("class", "gemini-chat-prompt-chip");
         chip.textContent = p.name;
         chip.title = p.prompt;
-        chip.style.whiteSpace = "nowrap";
-        chip.style.padding = "2px 8px";
-        chip.style.fontSize = "11px";
-        chip.style.border = "1px solid var(--color-border, #ccc)";
-        chip.style.borderRadius = "12px";
-        chip.style.background = "var(--color-field-bg, #fff)";
-        chip.style.cursor = "pointer";
-
-        chip.addEventListener("click", () => {
-          handleSend(p.prompt);
-        });
-
+        chip.onclick = () => handleSend(p.prompt);
         promptBar.appendChild(chip);
       });
-
-      if (promptBar.children.length > 0) {
-        header.appendChild(promptBar);
-      }
+      header.appendChild(promptBar);
     }
 
-    const messageList = doc.createElement("div");
-    messageList.className = "gemini-chat-messages";
-    messageList.style.display = "flex";
-    messageList.style.flexDirection = "column";
-    messageList.style.gap = "6px";
-    messageList.style.flex = "1";
-    messageList.style.overflow = "auto";
-    messageList.style.padding = "6px";
-    messageList.style.border = "1px solid var(--color-border, #ccc)";
-    messageList.style.borderRadius = "6px";
-    messageList.style.background = "var(--color-field-bg, #f8f8f8)";
+    // --- Messages ---
+    const messageList = createElement("div");
+    messageList.setAttribute("class", "gemini-chat-messages");
 
-    const input = doc.createElement("textarea");
-    input.placeholder = "Ask Gemini about this paper...";
-    input.rows = 3;
-    input.style.resize = "vertical";
-    input.style.width = "100%";
-    input.style.boxSizing = "border-box";
-    input.style.borderRadius = "6px";
-    input.style.padding = "6px";
+    // --- Input ---
+    const inputArea = createElement("div");
+    inputArea.setAttribute("class", "gemini-chat-input-area");
 
-    const actions = doc.createElement("div");
-    actions.style.display = "flex";
-    actions.style.justifyContent = "space-between";
-    actions.style.alignItems = "center";
+    const inputRow = createElement("div");
+    inputRow.setAttribute("class", "gemini-chat-input-row");
 
-    const hint = doc.createElement("span");
-    hint.style.fontSize = "11px";
-    hint.style.color = "var(--color-secondary-label, #555)";
-    hint.textContent = "Enter sends.";
+    const input = createElement("textarea") as HTMLTextAreaElement;
+    input.setAttribute("class", "gemini-chat-textarea");
+    input.placeholder = "Ask a question...";
+    input.rows = 1;
 
-    const sendBtn = doc.createElement("button");
-    sendBtn.textContent = "Send";
-    sendBtn.style.padding = "6px 12px";
-    sendBtn.style.borderRadius = "6px";
-    sendBtn.style.cursor = "pointer";
+    input.addEventListener("input", () => {
+      input.style.height = "auto";
+      input.style.height = (input.scrollHeight) + "px";
+    });
 
-    actions.appendChild(hint);
-    actions.appendChild(sendBtn);
+    const sendBtn = createElement("button") as HTMLButtonElement;
+    sendBtn.setAttribute("class", "gemini-chat-send-btn");
+    sendBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path></svg>`;
+    sendBtn.title = "Send";
+
+    const hint = createElement("div");
+    hint.setAttribute("class", "gemini-chat-hint");
+    hint.textContent = "Enter to send, Shift+Enter for new line";
+
+    inputRow.appendChild(input);
+    inputRow.appendChild(sendBtn);
+    inputArea.appendChild(inputRow);
+    inputArea.appendChild(hint);
 
     wrapper.appendChild(header);
     wrapper.appendChild(messageList);
-    wrapper.appendChild(input);
-    wrapper.appendChild(actions);
+    wrapper.appendChild(inputArea);
     body.appendChild(wrapper);
 
     const renderMessages = () => {
       messageList.innerHTML = "";
       messages.forEach((m, index) => {
-        const bubble = doc.createElement("div");
-        bubble.style.padding = "6px";
-        bubble.style.borderRadius = "6px";
-        bubble.style.position = "relative";
-        // bubble.style.whiteSpace = "pre-wrap";
-        bubble.style.background =
-          m.role === "user" ? "#e8f0fe" : m.role === "model" ? "#f1f5f9" : "#fff3cd";
-        bubble.style.border = "1px solid var(--color-border, #dcdcdc)";
-        bubble.style.userSelect = "text";
-        // @ts-ignore
-        bubble.style.MozUserSelect = "text";
+        const bubble = createElement("div");
+        bubble.setAttribute("class", `gemini-chat-bubble ${m.role}`);
 
         if (m.role === "user") {
-          const saveBtn = doc.createElement("button");
+          const saveBtn = createElement("button");
           saveBtn.textContent = "+";
-          saveBtn.title = "Add to Note";
-          saveBtn.className = "save-note-btn";
-          saveBtn.style.position = "absolute";
-          saveBtn.style.top = "-8px";
-          saveBtn.style.left = "-8px";
-          saveBtn.style.width = "20px";
-          saveBtn.style.height = "20px";
-          saveBtn.style.background = "white";
-          saveBtn.style.border = "1px solid #ccc";
-          saveBtn.style.borderRadius = "50%";
-          saveBtn.style.cursor = "pointer";
-          saveBtn.style.fontSize = "14px";
-          saveBtn.style.display = "flex";
-          saveBtn.style.alignItems = "center";
-          saveBtn.style.justifyContent = "center";
-          saveBtn.style.color = "#555";
-          saveBtn.style.zIndex = "10";
-          // saveBtn.style.opacity = "0";
-          // saveBtn.style.transition = "opacity 0.2s";
+          saveBtn.title = "Save pair to Note";
+          saveBtn.setAttribute("class", "gemini-chat-save-btn");
 
           saveBtn.onclick = async (e) => {
             e.stopPropagation();
@@ -378,26 +550,41 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
             saveBtn.textContent = "✔";
             setTimeout(() => (saveBtn.textContent = "+"), 2000);
           };
-
           bubble.appendChild(saveBtn);
-
-          // bubble.addEventListener("mouseenter", () => { saveBtn.style.opacity = "1"; });
-          // bubble.addEventListener("mouseleave", () => { saveBtn.style.opacity = "0"; });
         }
 
         try {
-          // Create a content wrapper to avoid overwriting the button
-          const content = doc.createElement("div");
-          content.innerHTML = getMarkdown().render(m.text);
+          const content = createElement("div");
+          // Initialize md if needed
+          const mdInstance = getMarkdown();
+          content.innerHTML = mdInstance.render(m.text);
           bubble.appendChild(content);
         } catch (e) {
-          const content = doc.createElement("div");
-          content.textContent = m.text;
-          content.style.whiteSpace = "pre-wrap";
-          bubble.appendChild(content);
+          bubble.textContent = m.text;
         }
+
+        if (m.meta && m.meta.duration) {
+          const meta = createElement("div");
+          meta.setAttribute("class", "gemini-chat-meta");
+          meta.textContent = `${(m.meta.duration / 1000).toFixed(1)}s`;
+          bubble.appendChild(meta);
+        }
+
         messageList.appendChild(bubble);
       });
+
+      // Show loading indicator if busy
+      if (addon.isBusy(itemKey)) {
+        const loadingBubble = createElement("div");
+        loadingBubble.setAttribute("class", "gemini-chat-bubble model loading");
+        loadingBubble.innerHTML = `
+          <div class="gemini-chat-dot"></div>
+          <div class="gemini-chat-dot"></div>
+          <div class="gemini-chat-dot"></div>
+        `;
+        messageList.appendChild(loadingBubble);
+      }
+
       messageList.scrollTop = messageList.scrollHeight;
     };
 
@@ -407,19 +594,22 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
       addon.setBusy(itemKey, busy);
       sendBtn.disabled = busy;
       input.disabled = busy;
-      sendBtn.textContent = busy ? "Asking..." : "Send";
+      sendBtn.style.opacity = busy ? "0.5" : "1";
     };
 
     const handleSend = async (overrideText?: string) => {
       const text = (typeof overrideText === "string" ? overrideText : input.value).trim();
       if (!text || addon.isBusy(itemKey)) return;
+
       addon.pushMessage(itemKey, {
         role: "user",
         text,
         at: Date.now(),
       });
+
       if (!overrideText) {
         input.value = "";
+        input.style.height = "auto";
       }
       renderMessages();
 
@@ -435,39 +625,31 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
       }
 
       setBusy(true);
+      const startTime = Date.now();
       try {
         const history = addon.getSession(itemKey);
         const pdfPart = await getPdfContextPart(item);
 
-        // Build full conversation history
         const contents = history.map((msg, index) => {
           const parts: any[] = [{ text: msg.text }];
-
-          // Inject context into the VERY FIRST message (if it's from user)
           if (index === 0 && msg.role === "user") {
-            // Add PDF data
-            if (pdfPart) {
-              parts.unshift({ inlineData: pdfPart });
-            }
-            // Add Title context
+            if (pdfPart) parts.unshift({ inlineData: pdfPart });
             if (item?.getField) {
               const title = item.getField("title") || "";
-              // Prepend title to the text part
               parts[parts.length - 1].text = `Paper title: ${title}\n\n${parts[parts.length - 1].text}`;
             }
           }
-
-          return {
-            role: msg.role,
-            parts: parts
-          };
+          return { role: msg.role, parts: parts };
         });
 
         const reply = await callGemini(settings, contents);
+        const duration = Date.now() - startTime;
+
         addon.pushMessage(itemKey, {
           role: "model",
           text: reply,
           at: Date.now(),
+          meta: { duration }
         });
       } catch (e: any) {
         addon.pushMessage(itemKey, {
@@ -481,22 +663,19 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
       }
     };
 
-    sendBtn.addEventListener("click", () => handleSend());
+    sendBtn.onclick = () => handleSend();
     input.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter" && !ev.shiftKey && !ev.ctrlKey && !ev.metaKey) {
+      if (ev.key === "Enter" && !ev.shiftKey) {
         ev.preventDefault();
         handleSend();
-      } else if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) {
-        // allow newline
       }
     });
-  } catch (error) {
-    Zotero.debug(`[GeminiChat] Render error: ${error}`);
-    body.textContent = "Error rendering chat pane. See debug logs.";
+
+  } catch (error: any) {
+    Zotero.debug(`[GeminiChat] Render error: ${error}\n${error?.stack}`);
+    body.textContent = `Error rendering chat pane: ${error?.message || error}`;
   }
 }
-
-// buildQuestionParts removed as it is now integrated into the history construction
 
 async function saveFullSessionToNote(item: Zotero.Item, messages: ChatMessage[]) {
   const parentID = item.isAttachment() ? item.parentID : item.id;
@@ -666,4 +845,3 @@ async function callGemini(settings: ReturnType<typeof getSettings>, contents: an
     if (timer) clearTimeout(timer);
   }
 }
-
