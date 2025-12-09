@@ -1,0 +1,21 @@
+# dot files
+.*
+!.git*
+!.scaffold
+!.vscode
+!.prettierrc*
+!.eslintrc*
+
+# dependencies
+node_modules/
+
+# build output
+build/
+.scaffold/build
+
+# logs
+*.log
+
+# OS
+Thumbs.db
+.DS_Store

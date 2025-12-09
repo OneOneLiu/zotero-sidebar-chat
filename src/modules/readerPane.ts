@@ -1,0 +1,374 @@
+import { config } from "../../package.json";
+import Addon, { ChatMessage } from "../addon";
+import { buildEndpoint, getSettings } from "./settings";
+import { getLocaleID } from "../utils/locale";
+
+type RenderOptions = {
+  body: HTMLElement;
+  item: Zotero.Item;
+};
+
+export function registerReaderPane(addon: Addon): string {
+  const paneKey =
+    Zotero.ItemPaneManager.registerSection({
+      paneID: "gemini-chat",
+      pluginID: config.addonID,
+      header: {
+        l10nID: getLocaleID("section-header"),
+        icon: `chrome://${config.addonRef}/content/icons/gemini.svg`,
+      },
+      sidenav: {
+        l10nID: getLocaleID("section-sidenav"),
+        icon: `chrome://${config.addonRef}/content/icons/gemini.svg`,
+        // @ts-ignore - orderable exists on ItemPaneManager sections
+        orderable: false,
+      },
+      bodyXHTML: `<div class="gemini-chat-body"></div>`,
+      onRender: ({ body, item }: RenderOptions) => {
+        renderChat(body, item, addon);
+      },
+      onItemChange: ({ tabType, body, item, setEnabled }) => {
+        const enabled = tabType === "reader";
+        setEnabled(enabled);
+        if (enabled) {
+          renderChat(body, item, addon);
+        } else {
+          body.innerHTML = "";
+        }
+        return true;
+      },
+    }) || "";
+
+  return paneKey;
+}
+
+export function registerSidebarButton(getPaneKey: () => string) {
+  Zotero.Reader.registerEventListener(
+    "renderSidebarAnnotationHeader",
+    (event) => {
+      const { doc, append } = event;
+      if (doc.getElementById("gemini-chat-sidebar-button")) return;
+
+      const btn = doc.createElementNS(
+        "http://www.w3.org/1999/xhtml",
+        "button",
+      );
+      btn.id = "gemini-chat-sidebar-button";
+      btn.className = "gemini-chat-jump";
+      btn.textContent = "Gemini";
+      btn.setAttribute("data-l10n-id", getLocaleID("sidebar-button"));
+      
+      btn.title = "Open Gemini chat pane";
+      btn.style.cssText =
+        "border:1px solid transparent;border-radius:4px;padding:2px 6px;cursor:pointer;background:var(--color-field-bg, #ececec);";
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const paneKey = getPaneKey();
+        if (!paneKey) {
+          return;
+        }
+        const details = doc.querySelector("item-details") as any;
+        if (details?.scrollToPane) {
+          details.scrollToPane(paneKey);
+        }
+      });
+      append(btn);
+    },
+    config.addonID,
+  );
+}
+
+function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
+  const itemKey = item?.id ? String(item.id) : "global";
+  const messages = addon.getSession(itemKey);
+  const doc = body.ownerDocument;
+
+  body.innerHTML = "";
+
+  const wrapper = doc.createElement("div");
+  wrapper.className = "gemini-chat-wrapper";
+  wrapper.style.display = "flex";
+  wrapper.style.flexDirection = "column";
+  wrapper.style.gap = "8px";
+  wrapper.style.padding = "8px";
+  wrapper.style.boxSizing = "border-box";
+  wrapper.style.height = "100%"; 
+
+  const header = doc.createElement("div");
+  header.style.display = "flex";
+  header.style.flexDirection = "column";
+  header.style.gap = "4px";
+  const title = doc.createElement("div");
+  title.textContent = "Gemini Chat";
+  title.style.fontWeight = "bold";
+  title.style.fontSize = "13px";
+  const subtitle = doc.createElement("div");
+  subtitle.style.fontSize = "11px";
+  subtitle.style.color = "var(--color-secondary-label, #555)";
+  subtitle.textContent = item?.getField?.("title")
+    ? `Current: ${item.getField("title")}`
+    : "Select a PDF tab to chat";
+  header.appendChild(title);
+  header.appendChild(subtitle);
+
+  const messageList = doc.createElement("div");
+  messageList.className = "gemini-chat-messages";
+  messageList.style.display = "flex";
+  messageList.style.flexDirection = "column";
+  messageList.style.gap = "6px";
+  messageList.style.flex = "1";
+  messageList.style.overflow = "auto";
+  messageList.style.padding = "6px";
+  messageList.style.border = "1px solid var(--color-border, #ccc)";
+  messageList.style.borderRadius = "6px";
+  messageList.style.background = "var(--color-field-bg, #f8f8f8)";
+
+  const input = doc.createElement("textarea");
+  input.placeholder = "Ask Gemini about this paper...";
+  input.rows = 3;
+  input.style.resize = "vertical";
+  input.style.width = "100%";
+  input.style.boxSizing = "border-box";
+  input.style.borderRadius = "6px";
+  input.style.padding = "6px";
+
+  const actions = doc.createElement("div");
+  actions.style.display = "flex";
+  actions.style.justifyContent = "space-between";
+  actions.style.alignItems = "center";
+
+  const hint = doc.createElement("span");
+  hint.style.fontSize = "11px";
+  hint.style.color = "var(--color-secondary-label, #555)";
+  hint.textContent = "Enter sends.";
+
+  const sendBtn = doc.createElement("button");
+  sendBtn.textContent = "Send";
+  sendBtn.style.padding = "6px 12px";
+  sendBtn.style.borderRadius = "6px";
+  sendBtn.style.cursor = "pointer";
+
+  actions.appendChild(hint);
+  actions.appendChild(sendBtn);
+
+  wrapper.appendChild(header);
+  wrapper.appendChild(messageList);
+  wrapper.appendChild(input);
+  wrapper.appendChild(actions);
+  body.appendChild(wrapper);
+
+  const renderMessages = () => {
+    messageList.innerHTML = "";
+    messages.forEach((m) => {
+      const bubble = doc.createElement("div");
+      bubble.style.padding = "6px";
+      bubble.style.borderRadius = "6px";
+      bubble.style.whiteSpace = "pre-wrap";
+      bubble.style.background =
+        m.role === "user" ? "#e8f0fe" : m.role === "model" ? "#f1f5f9" : "#fff3cd";
+      bubble.style.border = "1px solid var(--color-border, #dcdcdc)";
+      bubble.textContent = m.text;
+      messageList.appendChild(bubble);
+    });
+    messageList.scrollTop = messageList.scrollHeight;
+  };
+
+  renderMessages();
+
+  const setBusy = (busy: boolean) => {
+    addon.setBusy(itemKey, busy);
+    sendBtn.disabled = busy;
+    input.disabled = busy;
+    sendBtn.textContent = busy ? "Asking..." : "Send";
+  };
+
+  const handleSend = async () => {
+    const text = input.value.trim();
+    if (!text || addon.isBusy(itemKey)) return;
+    addon.pushMessage(itemKey, {
+      role: "user",
+      text,
+      at: Date.now(),
+    });
+    input.value = "";
+    renderMessages();
+
+    const settings = getSettings();
+    if (!settings.apiKey) {
+      addon.pushMessage(itemKey, {
+        role: "system",
+        text: "Missing API key. Set it in Preferences -> Gemini Chat.",
+        at: Date.now(),
+      });
+      renderMessages();
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const questionParts = buildQuestionParts(text, item);
+      const pdfPart = await getPdfContextPart(item);
+      
+      const payload: any[] = [];
+      if (pdfPart) {
+          payload.push({ inlineData: pdfPart });
+      }
+      payload.push({ text: questionParts });
+
+      const reply = await callGemini(settings, payload);
+      addon.pushMessage(itemKey, {
+        role: "model",
+        text: reply,
+        at: Date.now(),
+      });
+    } catch (e: any) {
+      addon.pushMessage(itemKey, {
+        role: "system",
+        text: `Gemini error: ${e?.message || e}`,
+        at: Date.now(),
+      });
+    } finally {
+      setBusy(false);
+      renderMessages();
+    }
+  };
+
+  sendBtn.addEventListener("click", handleSend);
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" && !ev.shiftKey && !ev.ctrlKey && !ev.metaKey) {
+      ev.preventDefault();
+      handleSend();
+    } else if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) {
+      // allow newline
+    }
+  });
+}
+
+function buildQuestionParts(question: string, item?: Zotero.Item): string {
+  let context = "";
+  if (item?.getField) {
+    const title = item.getField("title") || "";
+    context = `Paper title: ${title}\n`; 
+  }
+  return `${context}\nQuestion: ${question}`;
+}
+
+async function getPdfContextPart(item: Zotero.Item): Promise<{ mimeType: string; data: string } | null> {
+    const attachment = getBestAttachment(item);
+    if (!attachment) return null;
+    
+    const path = await attachment.getFilePathAsync();
+    if (!path) return null;
+
+    try {
+        const data = await getFileData(path);
+        if (data) {
+            return {
+                mimeType: "application/pdf",
+                data
+            };
+        }
+    } catch (e) {
+        Zotero.debug(`[GeminiChat] Failed to read PDF: ${e}`);
+    }
+    return null;
+}
+
+function getBestAttachment(item: Zotero.Item): Zotero.Item | null {
+    if (item.isAttachment()) return item;
+    if (item.isRegularItem()) {
+        const attachmentIDs = item.getAttachments();
+        for (const id of attachmentIDs) {
+            const att = Zotero.Items.get(id);
+            if (att && !att.isNote() && att.attachmentContentType === 'application/pdf') {
+                return att;
+            }
+        }
+    }
+    return null;
+}
+
+async function getFileData(path: string): Promise<string | null> {
+    if (typeof IOUtils !== "undefined") {
+      try {
+        const bytes = await IOUtils.read(path);
+        return arrayBufferToBase64(bytes);
+      } catch (e) {
+        Zotero.debug(`[GeminiChat] IOUtils read failed: ${e}`);
+      }
+    }
+    
+    // @ts-ignore
+    if (typeof OS !== "undefined" && OS.File) {
+      try {
+        // @ts-ignore
+        const bytes = await OS.File.read(path);
+        return arrayBufferToBase64(bytes);
+      } catch (e) {
+        Zotero.debug(`[GeminiChat] OS.File read failed: ${e}`);
+      }
+    }
+  
+    return null;
+}
+  
+function arrayBufferToBase64(buffer: Uint8Array | ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    const len = bytes.byteLength;
+    const chunkSize = 8192;
+    for (let i = 0; i < len; i += chunkSize) {
+        const end = Math.min(i + chunkSize, len);
+        const chunk = bytes.subarray(i, end);
+        // @ts-ignore
+        binary += String.fromCharCode.apply(null, chunk);
+    }
+    return btoa(binary);
+}
+
+async function callGemini(settings: ReturnType<typeof getSettings>, parts: any[]): Promise<string> {
+  const endpoint = buildEndpoint(settings);
+  const payload = {
+    contents: [
+      {
+        parts: parts,
+      },
+    ],
+  };
+
+  let signal: AbortSignal | undefined;
+  let timer: any;
+
+  if (typeof AbortController !== "undefined") {
+      const controller = new AbortController();
+      timer = setTimeout(() => controller.abort(), 60000);
+      signal = controller.signal;
+  }
+
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: signal,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`${res.status} ${res.statusText}: ${text}`);
+    }
+    const data = await res.json();
+    const content: string =
+      data?.candidates?.[0]?.content?.parts
+        ?.map((p: { text?: string }) => p.text)
+        .filter(Boolean)
+        .join("\n")
+        ?.trim() || "No response";
+    return content;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+

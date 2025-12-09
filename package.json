@@ -1,0 +1,36 @@
+{
+  "name": "zotero-gemini-chat",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "A minimal Zotero reader sidebar chat for Gemini models.",
+  "homepage": "https://example.com/zotero-gemini-chat",
+  "author": "Your Name",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/example/zotero-gemini-chat.git"
+  },
+  "config": {
+    "addonName": "Gemini Chat",
+    "addonID": "gemini-chat@local",
+    "addonRef": "GeminiChat",
+    "addonInstance": "GeminiChat",
+    "prefsPrefix": "extensions.zotero.geminiChat"
+  },
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "zotero-plugin serve",
+    "build": "zotero-plugin build && tsc --noEmit",
+    "release": "zotero-plugin release",
+    "update-deps": "npm update --save"
+  },
+  "dependencies": {
+    "zotero-plugin-toolkit": "^5.1.0-beta.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.16.5",
+    "typescript": "^5.9.3",
+    "zotero-plugin-scaffold": "^0.8.2",
+    "zotero-types": "^4.1.0-beta.3"
+  }
+}
+
