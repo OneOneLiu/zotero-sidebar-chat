@@ -156,6 +156,7 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
             flex-direction: column;
             gap: 8px;
             background: var(--color-background, #fff);
+            border-radius: 12px 12px 0 0;
           }
           .gemini-chat-title-row {
             display: flex;
@@ -178,7 +179,8 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
             padding: 2px 6px;
             border: 1px solid var(--color-border, #ccc);
             border-radius: 4px;
-            max-width: 140px;
+            max-width: 280px;
+            min-width: 200px;
             background-color: var(--color-field-bg, #fff);
             color: var(--color-text, #000);
           }
@@ -229,6 +231,10 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
             font-size: 13px;
             line-height: 1.5;
             word-wrap: break-word;
+            user-select: text;
+            -webkit-user-select: text;
+            -moz-user-select: text;
+            cursor: text;
           }
           .gemini-chat-bubble.user {
             align-self: flex-end;
@@ -308,33 +314,46 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
             border-color: #007aff;
           }
           .gemini-chat-send-btn {
-            background-color: #007aff;
-            color: white;
+            background-color: transparent;
+            color: #007aff;
             border: none;
-            border-radius: 50%;
             width: 32px;
             height: 32px;
             display: flex;
             align-items: center;
             justify-content: center;
             cursor: pointer;
-            font-size: 14px;
-            transition: background-color 0.2s;
+            font-size: 20px;
+            transition: transform 0.1s;
             padding: 0;
+            line-height: 1;
           }
           .gemini-chat-send-btn:hover {
-            background-color: #0064d1;
+            transform: scale(1.1);
+            background-color: transparent;
           }
           .gemini-chat-send-btn:disabled {
-            background-color: #ccc;
+            color: #ccc;
             cursor: default;
+            transform: none;
+          }
+          .gemini-chat-spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid #ccc;
+            border-top-color: #007aff;
+            border-radius: 50%;
+            animation: gemini-chat-spin 1s linear infinite;
+          }
+          @keyframes gemini-chat-spin {
+            to { transform: rotate(360deg); }
           }
           .gemini-chat-hint {
             font-size: 10px;
             color: var(--color-secondary-label, #888);
             text-align: center;
           }
-          .gemini-chat-bubble.loading {
+         .gemini-chat-bubble.loading {
             background-color: var(--color-field-bg, #f1f3f4);
             color: var(--color-secondary-label, #888);
             border-bottom-left-radius: 2px;
@@ -437,19 +456,25 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
     titleGroup.appendChild(modelSelect);
 
     const saveAllBtn = createElement("button");
-    saveAllBtn.textContent = "💾";
-    saveAllBtn.title = "Save full chat to note";
-    saveAllBtn.style.background = "none";
-    saveAllBtn.style.border = "none";
+    saveAllBtn.textContent = "+";
+    saveAllBtn.title = "Save whole chat to note";
+    saveAllBtn.style.background = "white";
+    saveAllBtn.style.border = "1px solid #ddd";
+    saveAllBtn.style.borderRadius = "50%";
+    saveAllBtn.style.width = "20px";
+    saveAllBtn.style.height = "20px";
+    saveAllBtn.style.display = "flex";
+    saveAllBtn.style.alignItems = "center";
+    saveAllBtn.style.justifyContent = "center";
     saveAllBtn.style.cursor = "pointer";
-    saveAllBtn.style.fontSize = "16px";
-    saveAllBtn.style.opacity = "0.7";
+    saveAllBtn.style.fontSize = "14px";
+    saveAllBtn.style.color = "#666";
 
     saveAllBtn.onclick = async () => {
       saveAllBtn.textContent = "...";
       await saveFullSessionToNote(item, messages);
       saveAllBtn.textContent = "✔";
-      setTimeout(() => (saveAllBtn.textContent = "💾"), 2000);
+      setTimeout(() => (saveAllBtn.textContent = "+"), 2000);
     };
 
     titleRow.appendChild(titleGroup);
@@ -512,7 +537,7 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
 
     const sendBtn = createElement("button") as HTMLButtonElement;
     sendBtn.setAttribute("class", "gemini-chat-send-btn");
-    sendBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path></svg>`;
+    sendBtn.textContent = "➤";
     sendBtn.title = "Send";
 
     const hint = createElement("div");
@@ -538,7 +563,7 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
         if (m.role === "user") {
           const saveBtn = createElement("button");
           saveBtn.textContent = "+";
-          saveBtn.title = "Save pair to Note";
+          saveBtn.title = "Save this request to note";
           saveBtn.setAttribute("class", "gemini-chat-save-btn");
 
           saveBtn.onclick = async (e) => {
@@ -594,8 +619,21 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
       addon.setBusy(itemKey, busy);
       sendBtn.disabled = busy;
       input.disabled = busy;
-      sendBtn.style.opacity = busy ? "0.5" : "1";
+
+      if (busy) {
+        sendBtn.innerHTML = ""; // Clear emoji
+        const spinner = createElement("div");
+        spinner.className = "gemini-chat-spinner";
+        sendBtn.appendChild(spinner);
+        sendBtn.title = "Asking...";
+      } else {
+        sendBtn.textContent = "➤";
+        sendBtn.title = "Send";
+      }
     };
+
+    // Initial sync
+    setBusy(addon.isBusy(itemKey));
 
     const handleSend = async (overrideText?: string) => {
       const text = (typeof overrideText === "string" ? overrideText : input.value).trim();
