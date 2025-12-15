@@ -680,11 +680,21 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
 
       setBusy(true);
       const startTime = Date.now();
+
+      // Create a placeholder message for the model response
+      addon.pushMessage(itemKey, {
+        role: "model",
+        text: "",
+        at: startTime,
+        meta: { duration: 0 }
+      });
+      renderMessages();
+
       try {
         const history = addon.getSession(itemKey);
         const pdfPart = await getPdfContextPart(item);
 
-        const contents = history.map((msg, index) => {
+        const contents = history.slice(0, -1).map((msg, index) => { // Exclude the empty model message we just added
           const parts: any[] = [{ text: msg.text }];
           if (index === 0 && msg.role === "user") {
             if (pdfPart) parts.unshift({ inlineData: pdfPart });
@@ -696,16 +706,30 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
           return { role: msg.role, parts: parts };
         });
 
-        const reply = await callGemini(settings, contents);
-        const duration = Date.now() - startTime;
+        // Get the last message (the one we just added) to update it
+        const sessions = addon.getSession(itemKey);
+        const modelMsg = sessions[sessions.length - 1];
 
-        addon.pushMessage(itemKey, {
-          role: "model",
-          text: reply,
-          at: Date.now(),
-          meta: { duration }
-        });
+        let accumulatedText = "";
+
+        for await (const chunk of callGeminiStream(settings, contents)) {
+          accumulatedText += chunk;
+          modelMsg.text = accumulatedText;
+          // Force re-render of the last bubble only? For now, full render is safer/easier
+          // Optimization: could just update the DOM element content directly if we tracked IDs
+          renderMessages();
+        }
+
+        const duration = Date.now() - startTime;
+        if (modelMsg.meta) {
+          modelMsg.meta.duration = duration;
+        }
+
       } catch (e: any) {
+        // If error, we might want to remove the empty model message or turn it into an error
+        const sessions = addon.getSession(itemKey);
+        sessions.pop(); // Remove the partial/empty model message
+
         addon.pushMessage(itemKey, {
           role: "system",
           text: `Gemini error: ${e?.message || e}`,
@@ -859,43 +883,125 @@ function arrayBufferToBase64(buffer: Uint8Array | ArrayBuffer | any): string {
   return btoa(binary);
 }
 
-async function callGemini(settings: ReturnType<typeof getSettings>, contents: any[]): Promise<string> {
-  const endpoint = buildEndpoint(settings);
-  const payload = {
-    contents: contents,
-  };
+async function* callGeminiStream(settings: ReturnType<typeof getSettings>, contents: any[]): AsyncGenerator<string, void, unknown> {
+  // Use stream=true
+  const endpoint = buildEndpoint(settings, true);
+  const payload = { contents };
 
   let signal: AbortSignal | undefined;
-  let timer: any;
-
   if (typeof AbortController !== "undefined") {
     const controller = new AbortController();
-    timer = setTimeout(() => controller.abort(), 60000);
+    // Longer timeout for streaming
+    setTimeout(() => controller.abort(), 120000);
     signal = controller.signal;
   }
 
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal,
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`${res.status} ${res.statusText}: ${text}`);
+  }
+
+  if (!res.body) throw new Error("No response body");
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+
   try {
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
-      signal: signal,
-    });
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`${res.status} ${res.statusText}: ${text}`);
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      buffer += chunk;
+
+      // Gemini returns a JSON array: [ { ... }, { ... } ]
+      // But acts as a stream. We simply regex for "text" fields to be safe and simple.
+      // A more robust way is to finding matching brackets, but regex is surprisingly effective for this specific API shape 
+      // if we are just extracting the text parts.
+      // However, to be cleaner, let's try to parse complete JSON objects from the buffer.
+      // The stream format is essentially:
+      // [
+      // { ... },
+      // { ... }
+      // ]
+
+      // We'll treat the buffer as text and extract content using regex to avoid complex JSON stream parsing logic
+      // Regex to find: "text": "..." 
+      // Note: This is a simplification. For production usage, a real JSON stream parser is better.
+      // But given we want "minimal new problems", regex on the JSON string is often safer than writing a fragile parser.
+
+      // Actually, let's try a split approach. The API usually sends one JSON object per 'data' chunk or comma separated.
+      // Let's match valid JSON objects.
+
+      let scannerIdx = 0;
+      while (scannerIdx < buffer.length) {
+        const start = buffer.indexOf('{', scannerIdx);
+        if (start === -1) break;
+
+        // Minimal bracket balancing
+        let depth = 0;
+        let end = -1;
+        let inString = false;
+        let escape = false;
+
+        for (let i = start; i < buffer.length; i++) {
+          const char = buffer[i];
+          if (escape) {
+            escape = false;
+            continue;
+          }
+          if (char === '\\') {
+            escape = true;
+            continue;
+          }
+          if (char === '"') {
+            inString = !inString;
+            continue;
+          }
+          if (!inString) {
+            if (char === '{') depth++;
+            if (char === '}') {
+              depth--;
+              if (depth === 0) {
+                end = i;
+                break;
+              }
+            }
+          }
+        }
+
+        if (end !== -1) {
+          const jsonStr = buffer.substring(start, end + 1);
+          try {
+            const parsed = JSON.parse(jsonStr);
+            // Extract text
+            const text = parsed?.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (text) {
+              yield text;
+            }
+          } catch (e) {
+            // ignore parse error, likely not a full object yet or just comma
+          }
+
+          // Move buffer forward
+          buffer = buffer.substring(end + 1);
+          scannerIdx = 0; // Reset scanner since buffer shifted
+        } else {
+          // Not enough data for a full object, wait for next chunk
+          scannerIdx = start + 1; // avoid infinite loop if malformed
+          break;
+        }
+      }
     }
-    const data: any = await res.json();
-    const content: string =
-      data?.candidates?.[0]?.content?.parts
-        ?.map((p: { text?: string }) => p.text)
-        .filter(Boolean)
-        .join("\n")
-        ?.trim() || "No response";
-    return content;
   } finally {
-    if (timer) clearTimeout(timer);
+    reader.releaseLock();
   }
 }

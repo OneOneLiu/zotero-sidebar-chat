@@ -17,7 +17,8 @@ export function getSettings() {
   };
 }
 
-export function buildEndpoint(settings: { apiBase: string; model: string; apiKey: string }): string {
-  return `${settings.apiBase}/models/${settings.model}:generateContent?key=${settings.apiKey}`;
+export function buildEndpoint(settings: { apiBase: string; model: string; apiKey: string }, stream = false): string {
+  const method = stream ? "streamGenerateContent" : "generateContent";
+  return `${settings.apiBase}/models/${settings.model}:${method}?key=${settings.apiKey}`;
 }
 
