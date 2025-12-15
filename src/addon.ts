@@ -49,9 +49,10 @@ class Addon {
   }
 
   public onMainWindowLoad(win: Window) {
-    if ((win as any).MozXULElement) {
-      (win as any).MozXULElement.insertFTLIfNeeded(`${config.addonRef}.ftl`);
-    }
+    // FTL injection disabled due to crash in Zotero 8 context menu
+    // if ((win as any).MozXULElement) {
+    //   (win as any).MozXULElement.insertFTLIfNeeded(`${config.addonRef}.ftl`);
+    // }
   }
 
   public getSession(key: string): ChatMessage[] {

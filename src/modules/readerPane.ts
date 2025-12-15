@@ -60,22 +60,23 @@ export function registerReaderPane(addon: Addon): string {
       sidenav: {
         l10nID: getLocaleID("section-sidenav"),
         icon: `chrome://${config.addonRef}/content/icons/gemini.svg`,
-        // @ts-ignore - orderable exists on ItemPaneManager sections
-        orderable: false,
       },
       bodyXHTML: `<div class="gemini-chat-body"></div>`,
       onRender: ({ body, item }: RenderOptions) => {
+        // Only render if we are likely in a valid context.
+        if (!body || !item) return;
         renderChat(body, item, addon);
       },
-      onItemChange: ({ tabType, body, item, setEnabled }) => {
+      onItemChange: async ({ tabType, body, item, setEnabled }: any) => {
+        // Strictly only enable for "reader"
         const enabled = tabType === "reader";
-        setEnabled(enabled);
-        if (enabled) {
+        if (typeof setEnabled === "function") setEnabled(enabled);
+
+        if (enabled && body && item) {
           renderChat(body, item, addon);
-        } else {
+        } else if (body) {
           body.innerHTML = "";
         }
-        return true;
       },
     }) || "";
 
@@ -83,37 +84,48 @@ export function registerReaderPane(addon: Addon): string {
 }
 
 export function registerSidebarButton(getPaneKey: () => string) {
+  if (!Zotero.Reader) {
+    Zotero.debug("[GeminiChat] Zotero.Reader not found, skipping sidebar button registration.");
+    return;
+  }
   Zotero.Reader.registerEventListener(
     "renderSidebarAnnotationHeader",
     (event) => {
-      const { doc, append } = event;
-      if (doc.getElementById("gemini-chat-sidebar-button")) return;
+      try {
+        const { doc, append } = event;
+        if (!doc || doc.getElementById("gemini-chat-sidebar-button")) return;
 
-      const btn = doc.createElementNS(
-        "http://www.w3.org/1999/xhtml",
-        "button",
-      );
-      btn.id = "gemini-chat-sidebar-button";
-      btn.className = "gemini-chat-jump";
-      btn.textContent = "Gemini";
-      btn.setAttribute("data-l10n-id", getLocaleID("sidebar-button"));
+        // Ensure we are in a valid window context
+        if (!doc.ownerGlobal || !doc.ownerGlobal.Zotero) return;
 
-      btn.title = "Open Gemini chat pane";
-      btn.style.cssText =
-        "border:1px solid transparent;border-radius:4px;padding:2px 6px;cursor:pointer;background:var(--color-field-bg, #ececec);";
-      btn.addEventListener("click", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const paneKey = getPaneKey();
-        if (!paneKey) {
-          return;
-        }
-        const details = doc.querySelector("item-details") as any;
-        if (details?.scrollToPane) {
-          details.scrollToPane(paneKey);
-        }
-      });
-      append(btn);
+        const btn = doc.createElementNS(
+          "http://www.w3.org/1999/xhtml",
+          "button",
+        );
+        btn.id = "gemini-chat-sidebar-button";
+        btn.className = "gemini-chat-jump";
+        btn.textContent = "Gemini";
+        btn.setAttribute("data-l10n-id", getLocaleID("sidebar-button"));
+
+        btn.title = "Open Gemini chat pane";
+        btn.style.cssText =
+          "border:1px solid transparent;border-radius:4px;padding:2px 6px;cursor:pointer;background:var(--color-field-bg, #ececec);";
+        btn.addEventListener("click", (e) => {
+          // Use stopImmediatePropagation to be sure, but be careful
+          e.preventDefault();
+          e.stopPropagation();
+          const paneKey = getPaneKey();
+          if (!paneKey) return;
+
+          const details = doc.querySelector("item-details") as any;
+          if (details && typeof details.scrollToPane === "function") {
+            details.scrollToPane(paneKey);
+          }
+        });
+        append(btn);
+      } catch (e) {
+        Zotero.debug(`[GeminiChat] Error in renderSidebarAnnotationHeader: ${e}`);
+      }
     },
     config.addonID,
   );
@@ -121,6 +133,11 @@ export function registerSidebarButton(getPaneKey: () => string) {
 
 function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
   Zotero.debug(`[GeminiChat] renderChat called for item ${item?.id}`);
+
+  if (!item || !item.id) {
+    Zotero.debug("[GeminiChat] renderChat aborted: invalid item");
+    return;
+  }
 
   try {
     const itemKey = item?.id ? String(item.id) : "global";
