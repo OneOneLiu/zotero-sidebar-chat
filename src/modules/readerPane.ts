@@ -197,7 +197,6 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
             border: 1px solid var(--color-border, #ccc);
             border-radius: 4px;
             max-width: 280px;
-            min-width: 200px;
             background-color: var(--color-field-bg, #fff);
             color: var(--color-text, #000);
           }
