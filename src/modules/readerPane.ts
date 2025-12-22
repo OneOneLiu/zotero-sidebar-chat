@@ -428,6 +428,9 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
              box-shadow: none;
              padding: 0 10px;
              margin-top: -8px;
+             display: flex;
+             gap: 4px;
+             align-items: center;
           }
           .gemini-chat-dot {
             width: 6px;
@@ -678,7 +681,6 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
     const setBusy = (busy: boolean) => {
       addon.setBusy(itemKey, busy);
       sendBtn.disabled = busy;
-      input.disabled = busy;
 
       if (busy) {
         sendBtn.innerHTML = ""; // Clear emoji
