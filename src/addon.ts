@@ -17,6 +17,7 @@ class Addon {
     paneKey: string;
     sessions: Record<string, ChatMessage[]>;
     noteIDs: Record<string, number>;
+    contextItems: Record<string, Zotero.Item[]>;
     busy: Record<string, boolean>;
   };
 
@@ -26,6 +27,7 @@ class Addon {
       paneKey: "",
       sessions: {},
       noteIDs: {},
+      contextItems: {},
       busy: {},
     };
   }
@@ -83,6 +85,29 @@ class Addon {
 
   public isBusy(key: string): boolean {
     return !!this.data.busy[key];
+  }
+
+  public getContextItems(key: string): Zotero.Item[] {
+    if (!this.data.contextItems[key]) {
+      this.data.contextItems[key] = [];
+    }
+    return this.data.contextItems[key];
+  }
+
+  public addContextItem(key: string, item: Zotero.Item) {
+    const items = this.getContextItems(key);
+    if (!items.find((i) => i.id === item.id)) {
+      items.push(item);
+    }
+  }
+
+  public removeContextItem(key: string, itemID: number) {
+    const items = this.getContextItems(key);
+    this.data.contextItems[key] = items.filter((i) => i.id !== itemID);
+  }
+
+  public clearContextItems(key: string) {
+    this.data.contextItems[key] = [];
   }
 }
 

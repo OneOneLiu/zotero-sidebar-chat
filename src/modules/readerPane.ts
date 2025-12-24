@@ -485,6 +485,68 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
           .gemini-chat-format-btn:hover {
             background: rgba(255,255,255,0.2);
           }
+          
+          /* Context Chips */
+          .gemini-chat-context-chips {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            padding: 0 16px 8px 16px;
+          }
+          .gemini-chat-context-chip {
+            font-size: 11px;
+            background: #e1e1e6;
+            color: var(--gemini-text-primary);
+            padding: 4px 8px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            max-width: 100%;
+          }
+          .gemini-chat-context-chip-text {
+             overflow: hidden;
+             text-overflow: ellipsis;
+             white-space: nowrap;
+             max-width: 120px;
+          }
+          .gemini-chat-context-remove {
+            cursor: pointer;
+            width: 14px;
+            height: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            background: rgba(0,0,0,0.1);
+            font-size: 9px;
+            line-height: 1;
+          }
+          .gemini-chat-context-remove:hover {
+            background: rgba(0,0,0,0.2);
+            color: white;
+          }
+
+          /* Input Add Button */
+          .gemini-chat-add-btn {
+            background: transparent;
+            color: var(--gemini-text-secondary);
+            border: none;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 20px;
+            border-radius: 50%;
+            margin-bottom: 4px; /* Align with textarea bottom */
+          }
+          .gemini-chat-add-btn:hover {
+             color: #007AFF;
+             background-color: rgba(0,122,255,0.05);
+          }
+
           @keyframes gemini-chat-fade-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
         `;
         head.appendChild(style);
@@ -747,12 +809,26 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
       }, 10);
     });
 
+
+
+    // --- Context Chips Area ---
+    const contextChips = createElement("div");
+    contextChips.setAttribute("class", "gemini-chat-context-chips");
+
     // --- Input ---
     const inputArea = createElement("div");
     inputArea.setAttribute("class", "gemini-chat-input-area");
 
     const inputRow = createElement("div");
     inputRow.setAttribute("class", "gemini-chat-input-row");
+
+    const addBtn = createElement("button");
+    addBtn.setAttribute("class", "gemini-chat-add-btn");
+    addBtn.textContent = "+";
+    addBtn.title = "Add context files";
+
+    // We'll define handleContextPicker later
+    addBtn.onclick = () => handleContextPicker();
 
     const input = createElement("textarea") as HTMLTextAreaElement;
     input.setAttribute("class", "gemini-chat-textarea");
@@ -773,8 +849,10 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
     hint.setAttribute("class", "gemini-chat-hint");
     hint.textContent = "Enter to send, Shift+Enter for new line";
 
+    inputRow.appendChild(addBtn);
     inputRow.appendChild(input);
     inputRow.appendChild(sendBtn);
+    inputArea.appendChild(contextChips); // Chips inside input area, at top
     inputArea.appendChild(inputRow);
     inputArea.appendChild(hint);
 
@@ -863,6 +941,148 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
     // Initial sync
     setBusy(addon.isBusy(itemKey));
 
+    const renderChips = () => {
+      contextChips.innerHTML = "";
+      const items = addon.getContextItems(itemKey);
+
+      items.forEach(ctxItem => {
+        const chip = createElement("div");
+        chip.className = "gemini-chat-context-chip";
+
+        let title = ctxItem.getField("title");
+        if (ctxItem.isAttachment() && ctxItem.parentItem) {
+          title = ctxItem.parentItem.getField("title");
+        }
+        if (!title) title = "Untitled";
+
+        const text = createElement("span");
+        text.className = "gemini-chat-context-chip-text";
+
+        // Truncate to 3 words
+        const words = title.split(/\s+/);
+        if (words.length > 3) {
+          text.textContent = words.slice(0, 3).join(" ") + "...";
+        } else {
+          text.textContent = title;
+        }
+
+        chip.title = title; // Full title in tooltip for the whole chip
+
+        const remove = createElement("span");
+        remove.className = "gemini-chat-context-remove";
+        remove.textContent = "✕";
+        remove.onclick = (e) => {
+          e.stopPropagation();
+          addon.removeContextItem(itemKey, ctxItem.id);
+          renderChips();
+        };
+
+        chip.appendChild(text);
+        chip.appendChild(remove);
+        contextChips.appendChild(chip);
+      });
+    };
+
+    // Initial render of chips
+    renderChips();
+
+    const handleContextPicker = async () => {
+      Zotero.debug("[GeminiChat] handleContextPicker (Native) triggered");
+      try {
+        const mainWindow = Zotero.getMainWindow();
+        if (!mainWindow) return;
+
+        // Native 'Select Items' dialog
+        // Usage: openDialog(url, name, options, io)
+        // standard Zotero select dialog uses io.dataOut to return items.
+        // io.dataIn can be used to set mode.
+
+        const io = {
+          dataIn: {}, // Empty dataIn often implies default selection mode? 
+          dataOut: null as (string[] | Zotero.Item[] | null),
+          singleSelection: false
+        };
+
+        // Based on Zotero source code inspection patterns or common knowledge:
+        // chrome://zotero/content/selectItemsDialog.xhtml is the list picker.
+        // However, for "Related" items, Zotero uses a specialized picker or configuring this one.
+        // If we pass 'dataIn' as null, does it default to library? We'll see.
+
+        mainWindow.openDialog(
+          "chrome://zotero/content/selectItemsDialog.xhtml",
+          "selectItems",
+          "chrome,modal,centerscreen,resizable=yes",
+          io
+        );
+
+        if (io.dataOut) {
+          const selection = io.dataOut;
+          Zotero.debug(`[GeminiChat] Native picker returned: ${Array.isArray(selection) ? selection.length : 'non-array'}`);
+
+          if (Array.isArray(selection)) {
+            let addedCount = 0;
+            selection.forEach((idOrItem: any) => {
+              const item = Zotero.Items.get(idOrItem) || idOrItem; // It might be ID or Item object
+              if (item instanceof Zotero.Item) {
+                // Logic to find PDF
+                let pdfItem: Zotero.Item | null = null;
+                if (item.isAttachment() && item.attachmentContentType === 'application/pdf') {
+                  pdfItem = item;
+                } else if (item.isRegularItem()) {
+                  const attachmentIDs = item.getAttachments();
+                  for (const id of attachmentIDs) {
+                    const att = Zotero.Items.get(id);
+                    if (att && !att.isNote() && att.attachmentContentType === 'application/pdf') {
+                      pdfItem = att;
+                      break;
+                    }
+                  }
+                }
+
+                if (pdfItem) {
+                  addon.addContextItem(itemKey, pdfItem);
+                  addedCount++;
+                }
+              }
+            });
+
+            if (addedCount > 0) renderChips();
+            else mainWindow.alert("No PDF attachments found in selection.");
+          }
+        }
+      } catch (e) {
+        Zotero.debug(`[GeminiChat] Context Picker Error: ${e}`);
+        // Fallback to manual selection if native fails completely?
+        // confirm("Native picker failed. Use manual selection?") ... 
+        // For now just log.
+        const mw = Zotero.getMainWindow();
+        if (mw) mw.alert("Error opening picker: " + e);
+      }
+    };
+
+    // Drop Handler for Drag & Drop
+    const handleDrop = (evt: DragEvent) => {
+      evt.preventDefault();
+      evt.stopPropagation();
+
+      const xfer = evt.dataTransfer;
+      if (!xfer) return;
+
+      const zoteroItems = xfer.getData("zotero/item");
+      if (zoteroItems) {
+        try {
+          // Fallback to calling the picker if drag detected but parsing is hard
+          handleContextPicker();
+        } catch (e) { }
+      }
+    };
+
+    contextChips.ondragover = (e) => {
+      e.preventDefault();
+      e.dataTransfer!.dropEffect = "copy";
+    };
+    contextChips.ondrop = handleDrop;
+
     const handleSend = async (overrideText?: string) => {
       const text = (typeof overrideText === "string" ? overrideText : input.value).trim();
       if (!text || addon.isBusy(itemKey)) return;
@@ -904,21 +1124,55 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
 
       try {
         const history = addon.getSession(itemKey);
-        const pdfPart = await getPdfContextPart(item);
 
-        const contents = history.slice(0, -1).map((msg, index) => { // Exclude the empty model message we just added
-          const parts: any[] = [{ text: msg.text }];
-          if (index === 0 && msg.role === "user") {
-            if (pdfPart) parts.unshift({ inlineData: pdfPart });
-            if (item?.getField) {
-              const title = item.getField("title") || "";
-              parts[parts.length - 1].text = `Paper title: ${title}\n\n${parts[parts.length - 1].text}`;
-            }
+        // --- Multi-file Context Gathering ---
+        const contextItems = addon.getContextItems(itemKey);
+
+        // Include current item if appropriate (usually yes)
+        // Check if current item has PDF content?
+        const currentAttachment = item.isAttachment() ? item : getBestAttachment(item);
+
+        const allContextFiles: Zotero.Item[] = [];
+        if (currentAttachment && (currentAttachment.attachmentContentType === 'application/pdf')) {
+          allContextFiles.push(currentAttachment);
+        }
+
+        contextItems.forEach(ci => {
+          // Dedupe
+          if (!allContextFiles.find(existing => existing.id === ci.id)) {
+            allContextFiles.push(ci);
           }
+        });
+
+        const contextParts: any[] = [];
+        for (const pdfItem of allContextFiles) {
+          const part = await getPdfContextPart(pdfItem);
+          if (part) {
+            const title = pdfItem.getField("title") || pdfItem.parentItem?.getField("title") || "Untitled";
+            contextParts.push({ text: `[Context Document: ${title}]` });
+            contextParts.push({ inlineData: part });
+          }
+        }
+
+        const contents = history.slice(0, -1).map((msg, index) => {
+          const parts: any[] = [{ text: msg.text }];
           return { role: msg.role, parts: parts };
         });
 
-        // Get the last message (the one we just added) to update it
+        // Find last user message in 'contents' and prepend context
+        if (contents.length > 0) {
+          let lastUserMsg = null;
+          for (let i = contents.length - 1; i >= 0; i--) {
+            if (contents[i].role === 'user') {
+              lastUserMsg = contents[i];
+              break;
+            }
+          }
+          if (lastUserMsg && contextParts.length > 0) {
+            lastUserMsg.parts.unshift(...contextParts);
+          }
+        }
+
         const sessions = addon.getSession(itemKey);
         const modelMsg = sessions[sessions.length - 1];
 
@@ -927,8 +1181,6 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
         for await (const chunk of callGeminiStream(settings, contents)) {
           accumulatedText += chunk;
           modelMsg.text = accumulatedText;
-          // Force re-render of the last bubble only? For now, full render is safer/easier
-          // Optimization: could just update the DOM element content directly if we tracked IDs
           renderMessages();
         }
 
@@ -938,9 +1190,8 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
         }
 
       } catch (e: any) {
-        // If error, we might want to remove the empty model message or turn it into an error
         const sessions = addon.getSession(itemKey);
-        sessions.pop(); // Remove the partial/empty model message
+        sessions.pop();
 
         addon.pushMessage(itemKey, {
           role: "system",
