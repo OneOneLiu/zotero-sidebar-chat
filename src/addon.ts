@@ -16,6 +16,7 @@ class Addon {
     config: typeof config;
     paneKey: string;
     sessions: Record<string, ChatMessage[]>;
+    noteIDs: Record<string, number>;
     busy: Record<string, boolean>;
   };
 
@@ -24,6 +25,7 @@ class Addon {
       config,
       paneKey: "",
       sessions: {},
+      noteIDs: {},
       busy: {},
     };
   }
@@ -69,6 +71,14 @@ class Addon {
 
   public setBusy(key: string, value: boolean) {
     this.data.busy[key] = value;
+  }
+
+  public getNoteID(key: string): number | undefined {
+    return this.data.noteIDs[key];
+  }
+
+  public setNoteID(key: string, id: number) {
+    this.data.noteIDs[key] = id;
   }
 
   public isBusy(key: string): boolean {

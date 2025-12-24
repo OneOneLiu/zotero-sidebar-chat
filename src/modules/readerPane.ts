@@ -544,30 +544,7 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
     titleGroup.appendChild(title);
     titleGroup.appendChild(modelSelect);
 
-    const saveAllBtn = createElement("button");
-    saveAllBtn.textContent = "+";
-    saveAllBtn.title = "Save whole chat to note";
-    saveAllBtn.style.background = "white";
-    saveAllBtn.style.border = "1px solid #ddd";
-    saveAllBtn.style.borderRadius = "50%";
-    saveAllBtn.style.width = "20px";
-    saveAllBtn.style.height = "20px";
-    saveAllBtn.style.display = "flex";
-    saveAllBtn.style.alignItems = "center";
-    saveAllBtn.style.justifyContent = "center";
-    saveAllBtn.style.cursor = "pointer";
-    saveAllBtn.style.fontSize = "14px";
-    saveAllBtn.style.color = "#666";
-
-    saveAllBtn.onclick = async () => {
-      saveAllBtn.textContent = "...";
-      await saveFullSessionToNote(item, messages);
-      saveAllBtn.textContent = "✔";
-      setTimeout(() => (saveAllBtn.textContent = "+"), 2000);
-    };
-
     titleRow.appendChild(titleGroup);
-    titleRow.appendChild(saveAllBtn);
     header.appendChild(titleRow);
 
     const subtitle = createElement("div");
@@ -601,6 +578,41 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
         promptBar.appendChild(chip);
       });
       header.appendChild(promptBar);
+    }
+
+    // --- Load History Button (if empty) ---
+    if (messages.length === 0) {
+      getHistoryNote(item).then(note => {
+        if (note) {
+          const loadContainer = createElement("div");
+          loadContainer.style.padding = "0 16px";
+          loadContainer.style.marginBottom = "8px";
+
+          const loadBtn = createElement("button");
+          loadBtn.textContent = "📂 Load Chat History from Note";
+          loadBtn.className = "gemini-chat-prompt-chip"; // Reuse chip style
+          loadBtn.style.width = "100%";
+          loadBtn.style.textAlign = "center";
+          loadBtn.style.backgroundColor = "#f0f0f0";
+
+          loadBtn.onclick = () => {
+            const noteContent = note.getNote();
+            const loadedMsgs = parseHistoryFromNote(noteContent);
+            if (loadedMsgs.length > 0) {
+              loadedMsgs.forEach(m => addon.pushMessage(itemKey, m));
+              // Force re-render
+              renderChat(body, item, addon);
+            }
+          };
+
+          loadContainer.appendChild(loadBtn);
+          // Insert after header or prompts?
+          // Prompts are inside header. Steps:
+          // header -> [Title, Subtitle, Prompts]
+          // Let's put this inside header at the bottom?
+          header.appendChild(loadContainer);
+        }
+      });
     }
 
     // --- Messages ---
@@ -659,6 +671,12 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
             if (contentNode) {
               // Update the message text with the new HTML
               messages[index].text = contentNode.innerHTML;
+
+              // Auto-save changes
+              const currentNoteID = addon.getNoteID(itemKey);
+              saveFullSessionToNote(item, messages, currentNoteID).then(id => {
+                if (id) addon.setNoteID(itemKey, id);
+              }).catch(e => Zotero.debug(`[GeminiChat] Auto-save highlight failed: ${e}`));
             }
           }
         }
@@ -932,6 +950,17 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
       } finally {
         setBusy(false);
         renderMessages();
+
+        // Auto-save chat history
+        try {
+          const currentNoteID = addon.getNoteID(itemKey);
+          const savedID = await saveFullSessionToNote(item, messages, currentNoteID);
+          if (savedID) {
+            addon.setNoteID(itemKey, savedID);
+          }
+        } catch (e) {
+          Zotero.debug(`[GeminiChat] Auto-save failed: ${e}`);
+        }
       }
     };
 
@@ -949,34 +978,70 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
   }
 }
 
-async function saveFullSessionToNote(item: Zotero.Item, messages: ChatMessage[]) {
+async function saveFullSessionToNote(item: Zotero.Item, messages: ChatMessage[], existingNoteID?: number): Promise<number | null> {
   const parentID = item.isAttachment() ? item.parentID : item.id;
-  if (!parentID) return;
+  if (!parentID) return null;
 
-  const note = new Zotero.Item("note");
-  note.parentID = parentID;
+  let note: any;
 
-  let html = `<h2>Gemini Chat Session (${new Date().toLocaleString()})</h2>`;
+  // 1. Try to find existing history note by name first if no ID provided or valid
+  // This ensures singleton behavior per item
+  if (!note) {
+    const historyNote = await getHistoryNote(item);
+    if (historyNote) {
+      note = historyNote;
+    }
+  }
+
+  // 2. If existingNoteID was explicitly passed and valid, use it (though step 1 mostly covers it)
+  if (!note && existingNoteID) {
+    try {
+      const existing = Zotero.Items.get(existingNoteID);
+      if (existing && !existing.deleted && existing.isNote()) {
+        note = existing;
+      }
+    } catch (e) { }
+  }
+
+  // 3. Create new if not found
+  if (!note) {
+    note = new Zotero.Item("note");
+    note.parentID = parentID;
+  }
+
+  let html = `<h2>Gemini Chat History</h2>`;
 
   messages.forEach(m => {
     const role = m.role === "user" ? "User" : (m.role === "model" ? "Gemini" : "System");
 
-    // Use getMarkdown().render for formatting
     let content = "";
     try {
+      // If we are repopulating from loaded history which is already HTML, this might double encode?
+      // m.text from loaded history is HTML.
+      // m.text from fresh input is Markdown.
+      // We can heuristic check? Or just trust markdown-it to handle it.
+      // If m.text starts with <, assume HTML?
+
       content = getMarkdown().render(m.text);
     } catch (e) {
-      content = m.text; // Fallback
+      content = m.text;
     }
 
-    html += `<p><strong>${role}:</strong></p>
+    let timestampHtml = "";
+    if (m.role === "user" && m.at) {
+      const timeStr = new Date(m.at).toLocaleString();
+      timestampHtml = `<p class="gemini-chat-timestamp" style="color:#888; font-size:0.8em; margin-bottom:0;">[${timeStr}]</p>`;
+    }
+
+    html += `${timestampHtml}<p><strong>${role}:</strong></p>
     ${content}
     <hr/>`;
   });
 
   note.setNote(html);
   await note.saveTx();
-  Zotero.debug(`[GeminiChat] Full chat saved to item ${parentID}`);
+
+  return note.id;
 }
 
 async function saveToNote(item: Zotero.Item, question: string, answer: string) {
@@ -1002,6 +1067,68 @@ ${aHtml}`);
 
   await note.saveTx();
   Zotero.debug(`[GeminiChat] Note saved to item ${parentID}`);
+}
+
+async function getHistoryNote(item: Zotero.Item): Promise<Zotero.Item | null> {
+  const parentID = item.isAttachment() ? item.parentID : item.id;
+  if (!parentID) return null;
+
+  const parent = Zotero.Items.get(parentID);
+  if (!parent) return null;
+
+  const noteIDs = parent.getNotes();
+  for (const id of noteIDs) {
+    const note = Zotero.Items.get(id);
+    if (note && !note.deleted && note.getNote().includes("<h2>Gemini Chat History</h2>")) {
+      return note;
+    }
+  }
+  return null;
+}
+
+function parseHistoryFromNote(html: string): ChatMessage[] {
+  const messages: ChatMessage[] = [];
+  // Simple parsing based on known structure
+  // <h2>Gemini Chat History</h2>
+  // <p class="gemini-chat-timestamp">...</p>
+  // <p><strong>User:</strong></p> ... <hr/>
+  // <p><strong>Gemini:</strong></p> ... <hr/>
+
+  const chunks = html.split("<hr/>");
+  chunks.forEach(chunk => {
+    // Determine role
+    let role: "user" | "model" | "system" | null = null;
+    let text = "";
+
+    // Remove timestamp from chunk for parsing text
+    // The timestamp is usually before the User label
+    const cleanChunk = chunk.replace(/<p class="gemini-chat-timestamp".*?<\/p>/g, "");
+
+    if (cleanChunk.includes("<strong>User:</strong>")) {
+      role = "user";
+      text = cleanChunk.replace(/<p><strong>User:<\/strong><\/p>/, "").trim();
+    } else if (cleanChunk.includes("<strong>Gemini:</strong>")) {
+      role = "model";
+      text = cleanChunk.replace(/<p><strong>Gemini:<\/strong><\/p>/, "").trim();
+    } else if (cleanChunk.includes("<strong>System:</strong>")) {
+      role = "system";
+      text = cleanChunk.replace(/<p><strong>System:<\/strong><\/p>/, "").trim();
+    }
+
+    if (role && text) {
+      // Clean up common wrapper if present (though split might leave some)
+      // The text is HTML. We can just use it as is for now since the view expects HTML-ish
+      // or markdown.
+      // The current view renders markdown. If we pass HTML, markdown-it preserves it.
+      messages.push({
+        role,
+        text,
+        at: Date.now() // Timestamps are stripped from view, so we just use current for the object
+      });
+    }
+  });
+
+  return messages;
 }
 
 async function getPdfContextPart(item: Zotero.Item): Promise<{ mimeType: string; data: string } | null> {
