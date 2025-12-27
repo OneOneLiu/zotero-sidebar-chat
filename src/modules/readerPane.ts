@@ -6,7 +6,12 @@ import { config } from "../../package.json";
 import Addon, { ChatMessage } from "../addon";
 import { getSettings } from "./settings";
 import { getLocaleID } from "../utils/locale";
-import { GEMINI_MODELS, getProviderConfig } from "../constants";
+import {
+  getProviderConfig,
+  GEMINI_MODELS,
+  DEEPSEEK_MODELS,
+  DOUBAO_MODELS
+} from "../constants";
 import { getProvider } from "../providers";
 
 Zotero.debug("[GeminiChat] Loading readerPane module...");
@@ -36,7 +41,7 @@ function getMarkdown() {
       });
       Zotero.debug("[GeminiChat] MarkdownIt initialized success.");
     } catch (e) {
-      Zotero.debug(`[GeminiChat] Failed to init Markdown: ${e}`);
+      Zotero.debug(`[GeminiChat] Failed to init Markdown: ${e} `);
       md = {
         render: (text: string) => text,
       };
@@ -590,17 +595,30 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
 
     titleGroup.appendChild(title);
 
-    // Only show model selector dropdown for Gemini
+    // Show model selector dropdown for providers with dropdown support
     if (providerConfig?.usesDropdown) {
       const modelSelect = createElement("select") as HTMLSelectElement;
       modelSelect.setAttribute("class", "gemini-chat-model-select");
 
-      const models = GEMINI_MODELS;
+      // Get models based on provider
+      let models: string[] = [];
+      if (currentSettings.provider === "gemini") {
+        models = GEMINI_MODELS;
+      } else if (currentSettings.provider === "deepseek") {
+        models = DEEPSEEK_MODELS;
+      } else if (currentSettings.provider === "doubao") {
+        models = DOUBAO_MODELS;
+      }
 
       models.forEach(m => {
         const opt = createElement("option") as HTMLOptionElement;
         opt.value = m;
-        opt.textContent = m.replace("gemini-", "");
+        // Simplify display name for better readability
+        if (currentSettings.provider === "gemini") {
+          opt.textContent = m.replace("gemini-", "");
+        } else {
+          opt.textContent = m;
+        }
         if (m === currentSettings.model) {
           opt.selected = true;
         }
@@ -614,7 +632,7 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
 
       titleGroup.appendChild(modelSelect);
     } else {
-      // For non-Gemini providers, show model name as text
+      // For providers without dropdown, show model name as text
       const modelName = createElement("div");
       modelName.setAttribute("class", "gemini-chat-subtitle");
       modelName.textContent = currentSettings.model || "No model specified";
@@ -914,19 +932,25 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
         if ((m.meta && m.meta.duration) || m.usage) {
           const meta = createElement("div");
           meta.setAttribute("class", "gemini-chat-meta");
-          if (m.usage) meta.style.cursor = "help";
 
           let metaText = "";
+
+          // Always show duration if available
           if (m.meta && m.meta.duration) {
             metaText += `${(m.meta.duration / 1000).toFixed(1)}s`;
           }
-          if (m.usage) {
-            if (metaText) metaText += " | ";
-            // Display as: Prompt / Output (Total)
-            // e.g. 150 / 50 (200 tks)
-            metaText += `${m.usage.promptTokens} / ${m.usage.completionTokens} tks`;
-            const tooltip = `Total: ${m.usage.totalTokens}\nPrompt: ${m.usage.promptTokens}\nOutput: ${m.usage.completionTokens}`;
-            meta.setAttribute("title", tooltip);
+
+          // Only show token usage for Gemini provider AND when data is valid
+          const currentSettings = getSettings();
+          if (m.usage && currentSettings.provider === "gemini") {
+            // Check if usage data is valid (not undefined)
+            if (m.usage.promptTokens !== undefined && m.usage.completionTokens !== undefined) {
+              if (metaText) metaText += " | ";
+              metaText += `${m.usage.promptTokens} / ${m.usage.completionTokens} tks`;
+              const tooltip = `Total: ${m.usage.totalTokens}\nPrompt: ${m.usage.promptTokens}\nOutput: ${m.usage.completionTokens}`;
+              meta.setAttribute("title", tooltip);
+              meta.style.cursor = "help";
+            }
           }
 
           meta.textContent = metaText;
@@ -1134,7 +1158,7 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
       if (!settings.apiKey) {
         addon.pushMessage(itemKey, {
           role: "system",
-          text: `Missing API key. Set it in Preferences -> LLM Chat.`,
+          text: `Missing API key. Set it in Preferences -> Sidebar Chat.`,
           at: Date.now(),
         });
         renderMessages();
@@ -1229,11 +1253,8 @@ function renderChat(body: HTMLElement, item: Zotero.Item, addon: Addon) {
             accumulatedText += chunk;
             modelMsg.text = accumulatedText;
           } else if (typeof chunk === "object" && chunk.usage) {
-            modelMsg.usage = {
-              promptTokens: chunk.usage.promptTokenCount,
-              completionTokens: chunk.usage.candidatesTokenCount,
-              totalTokens: chunk.usage.totalTokenCount
-            };
+            // The provider already returns normalized usage data
+            modelMsg.usage = chunk.usage;
           }
           renderMessages();
         }
