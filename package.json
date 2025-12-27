@@ -10,7 +10,7 @@
     "url": "git+https://github.com/example/zotero-gemini-chat.git"
   },
   "config": {
-    "addonName": "Gemini Chat",
+    "addonName": "Zotero Sidebar Chat",
     "addonID": "gemini-chat@local",
     "addonRef": "GeminiChat",
     "addonInstance": "GeminiChat",

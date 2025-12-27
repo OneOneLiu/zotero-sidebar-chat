@@ -19,7 +19,7 @@ export const PROVIDERS: ProviderConfig[] = [
         id: "deepseek",
         name: "DeepSeek",
         defaultApiBase: "https://api.deepseek.com",
-        usesDropdown: false,
+        usesDropdown: true,
     },
     {
         id: "doubao",
@@ -39,6 +39,23 @@ export const GEMINI_MODELS = [
     "gemini-2.5-flash-lite",
     "gemini-2.5-pro",
     "gemini-1.5-flash-latest",
+];
+
+/**
+ * DeepSeek model list
+ */
+export const DEEPSEEK_MODELS = [
+    "deepseek-chat",
+    "deepseek-reasoner",
+];
+
+/**
+ * Doubao model list
+ */
+export const DOUBAO_MODELS = [
+    "doubao-seed-1-6-flash-250615",
+    "doubao-seed-1.6-250615",
+    "doubao-seed-1-6-lite-251015",
 ];
 
 /**

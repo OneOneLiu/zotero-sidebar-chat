@@ -1314,7 +1314,7 @@ async function saveFullSessionToNote(item: Zotero.Item, messages: ChatMessage[],
     note.parentID = parentID;
   }
 
-  let html = `<h2>Gemini Chat History</h2>`;
+  let html = `<h2>Chat History</h2>`;
 
   messages.forEach(m => {
     const role = m.role === "user" ? "User" : (m.role === "model" ? "Gemini" : "System");
@@ -1363,7 +1363,7 @@ async function saveToNote(item: Zotero.Item, question: string, answer: string) {
   const qHtml = getMarkdown().render(question);
   const aHtml = getMarkdown().render(answer);
 
-  note.setNote(`<h2>Gemini Chat</h2>
+  note.setNote(`<h2>Chat History</h2>
 <p><strong>User:</strong></p>
 ${qHtml}
 <hr/>
@@ -1384,7 +1384,7 @@ async function getHistoryNote(item: Zotero.Item): Promise<Zotero.Item | null> {
   const noteIDs = parent.getNotes();
   for (const id of noteIDs) {
     const note = Zotero.Items.get(id);
-    if (note && !note.deleted && note.getNote().includes("<h2>Gemini Chat History</h2>")) {
+    if (note && !note.deleted && note.getNote().includes("<h2>Chat History</h2>")) {
       return note;
     }
   }
@@ -1394,7 +1394,7 @@ async function getHistoryNote(item: Zotero.Item): Promise<Zotero.Item | null> {
 function parseHistoryFromNote(html: string): ChatMessage[] {
   const messages: ChatMessage[] = [];
   // Simple parsing based on known structure
-  // <h2>Gemini Chat History</h2>
+  // <h2>Chat History</h2>
   // <p class="gemini-chat-timestamp">...</p>
   // <p><strong>User:</strong></p> ... <hr/>
   // <p><strong>Gemini:</strong></p> ... <hr/>

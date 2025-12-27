@@ -1,5 +1,5 @@
 import { config } from "../../package.json";
-import { GEMINI_MODELS, PROVIDERS } from "../constants";
+import { PROVIDERS, GEMINI_MODELS, DEEPSEEK_MODELS } from "../constants";
 import { getProvider } from "../providers";
 
 function getZotero(): any {
@@ -13,13 +13,13 @@ function getZotero(): any {
 }
 
 function getPrefKey(key: string) {
-  return `${config.prefsPrefix}.${key}`;
+  return `${config.prefsPrefix}.${key} `;
 }
 
 function getInput(id: string): HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement {
   const el = document.getElementById(id);
   if (!el || (!(el instanceof HTMLInputElement) && !(el instanceof HTMLTextAreaElement) && !(el instanceof HTMLSelectElement))) {
-    throw new Error(`Missing input ${id}`);
+    throw new Error(`Missing input ${id} `);
   }
   return el;
 }
@@ -53,14 +53,33 @@ function initForm(Zotero: any) {
   const savedProvider = (Zotero.Prefs.get(getPrefKey("provider"), true) as string) || "gemini";
   providerSelect.value = savedProvider;
 
-  // Populate Gemini models
-  modelSelect.innerHTML = "";
-  GEMINI_MODELS.forEach(m => {
-    const opt = document.createElement("option");
-    opt.value = m;
-    opt.textContent = m;
-    modelSelect.appendChild(opt);
-  });
+  // Function to populate model dropdown based on provider
+  const populateModelDropdown = (provider: string) => {
+    modelSelect.innerHTML = "";
+    let models: string[] = [];
+
+    if (provider === "gemini") {
+      models = GEMINI_MODELS;
+    } else if (provider === "deepseek") {
+      models = DEEPSEEK_MODELS;
+    }
+
+    // Add model options
+    models.forEach(m => {
+      const opt = document.createElement("option");
+      opt.value = m;
+      opt.textContent = m;
+      modelSelect.appendChild(opt);
+    });
+
+    // Add "Custom..." option for providers with dropdown
+    if (models.length > 0) {
+      const customOpt = document.createElement("option");
+      customOpt.value = "__custom__";
+      customOpt.textContent = "Custom...";
+      modelSelect.appendChild(customOpt);
+    }
+  };
 
   // Function to update UI based on selected provider
   const updateProviderUI = (isInitialLoad = false) => {
@@ -85,19 +104,37 @@ function initForm(Zotero: any) {
 
     // Show/hide model input based on provider
     if (providerConfig.usesDropdown) {
-      // Gemini: Use dropdown
-      modelSelect.style.display = "block";
-      modelInput.style.display = "none";
+      // Providers with dropdown (Gemini, DeepSeek)
+      populateModelDropdown(selectedProvider);
 
-      if (!isInitialLoad) {
-        // Reset to default Gemini model when switching
-        modelSelect.value = "gemini-1.5-flash-latest";
-        save("model", "gemini-1.5-flash-latest");
+      const savedModel = (Zotero.Prefs.get(getPrefKey("model"), true) as string) || "";
+
+      // Check if saved model is in the dropdown list
+      const modelOptions = Array.from(modelSelect.options).map((opt: HTMLOptionElement) => opt.value);
+      const isCustomModel = savedModel && !modelOptions.includes(savedModel) && savedModel !== "__custom__";
+
+      if (isCustomModel || savedModel === "__custom__") {
+        // Show custom input
+        modelSelect.value = "__custom__";
+        modelSelect.style.display = "block";
+        modelInput.style.display = "block";
+        modelInput.value = isCustomModel ? savedModel : "";
       } else {
-        modelSelect.value = (Zotero.Prefs.get(getPrefKey("model"), true) as string) || "gemini-1.5-flash-latest";
+        // Use dropdown
+        modelSelect.style.display = "block";
+        modelInput.style.display = "none";
+
+        if (!isInitialLoad) {
+          // Reset to first model when switching
+          const defaultModel = selectedProvider === "gemini" ? "gemini-1.5-flash-latest" : "deepseek-chat";
+          modelSelect.value = defaultModel;
+          save("model", defaultModel);
+        } else {
+          modelSelect.value = savedModel || (selectedProvider === "gemini" ? "gemini-1.5-flash-latest" : "deepseek-chat");
+        }
       }
     } else {
-      // Others: Use text input
+      // Providers without dropdown (Doubao)
       modelSelect.style.display = "none";
       modelInput.style.display = "block";
 
@@ -109,7 +146,7 @@ function initForm(Zotero: any) {
         modelInput.value = (Zotero.Prefs.get(getPrefKey("model"), true) as string) || "";
       }
 
-      modelInput.placeholder = `Enter model name (e.g., ${selectedProvider === 'deepseek' ? 'deepseek-chat' : 'doubao-model'})`;
+      modelInput.placeholder = `Enter model name(e.g., doubao - model)`;
     }
   };
 
@@ -250,9 +287,27 @@ function initForm(Zotero: any) {
 
   apiBase.addEventListener("change", () => save("apiBase", apiBase.value.trim()));
 
-  // Save model based on which input is visible
-  modelSelect.addEventListener("change", () => save("model", modelSelect.value.trim()));
-  modelInput.addEventListener("change", () => save("model", modelInput.value.trim()));
+  // Event listeners for saving prefs
+  providerSelect.addEventListener("change", () => {
+    updateProviderUI();
+    save("provider", providerSelect.value);
+  });
+
+  modelSelect.addEventListener("change", () => {
+    if (modelSelect.value === "__custom__") {
+      // Show custom input when "Custom..." is selected
+      modelInput.style.display = "block";
+      modelInput.focus();
+    } else {
+      // Hide custom input and save selected model
+      modelInput.style.display = "none";
+      save("model", modelSelect.value);
+    }
+  });
+
+  modelInput.addEventListener("input", () => {
+    save("model", modelInput.value);
+  });
 
   apiKey.addEventListener("change", () => save("apiKey", apiKey.value.trim()));
   chatHeight.addEventListener("change", () => save("chatHeight", chatHeight.value.trim()));
@@ -297,7 +352,7 @@ function initForm(Zotero: any) {
 
       // OpenAI-compatible providers use Authorization header
       if (selectedProvider !== "gemini") {
-        headers["Authorization"] = `Bearer ${apiKey.value.trim()}`;
+        headers["Authorization"] = `Bearer ${apiKey.value.trim()} `;
       }
 
       const res = await fetch(endpoint, {
@@ -308,12 +363,12 @@ function initForm(Zotero: any) {
 
       if (!res.ok) {
         const text = await res.text();
-        throw new Error(`${res.status} ${res.statusText}: ${text}`);
+        throw new Error(`${res.status} ${res.statusText}: ${text} `);
       }
       status.textContent = "OK";
       status.style.color = "#2e7d32";
     } catch (e: any) {
-      status.textContent = `Failed: ${e?.message || e}`;
+      status.textContent = `Failed: ${e?.message || e} `;
       status.style.color = "#b3261e";
     }
   });
