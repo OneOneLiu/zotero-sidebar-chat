@@ -10,6 +10,8 @@
 
 A Zotero plugin that brings a minimal, versatile AI chat directly into your Zotero reader sidebar. It supports Google Gemini, DeepSeek, and Doubao models, allowing you to ask questions, summarize content, and interact with your documents without leaving Zotero. Chat histories can be saved to notes, and AI responses can be annotated just like your PDFs.
 
+![](./images/plugin.png)
+
 ## How to Use
 
 1. Download and install the `zotero-sidebar-chat.xpi` from the Release page into Zotero 7.
